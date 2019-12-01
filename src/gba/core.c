@@ -185,7 +185,7 @@ static bool _GBACoreInit(struct mCore* core) {
 	GBAVideoSoftwareRendererCreate(&gbacore->renderer);
 	gbacore->renderer.outputBuffer = NULL;
 
-#if defined(BUILD_GLES2) || defined(BUILD_GLES3)
+#if (defined(BUILD_GLES2) || defined(BUILD_GLES3)) && !defined(__EMSCRIPTEN__)
 	GBAVideoGLRendererCreate(&gbacore->glRenderer);
 	gbacore->glRenderer.outputTex = -1;
 #endif

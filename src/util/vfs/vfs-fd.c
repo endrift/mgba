@@ -168,7 +168,7 @@ static bool _vfdSync(struct VFile* vf, const void* buffer, size_t size) {
 #ifndef _WIN32
 #ifdef __HAIKU__
 	futimens(vfd->fd, NULL);
-#else
+#elif !defined(__EMSCRIPTEN__)
 	futimes(vfd->fd, NULL);
 #endif
 	if (buffer && size) {
