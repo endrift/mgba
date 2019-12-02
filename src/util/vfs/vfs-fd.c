@@ -13,6 +13,9 @@
 #else
 #include <windows.h>
 #endif
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 struct VFileFD {
 	struct VFile d;
@@ -171,10 +174,17 @@ static bool _vfdSync(struct VFile* vf, const void* buffer, size_t size) {
 #elif !defined(__EMSCRIPTEN__)
 	futimes(vfd->fd, NULL);
 #endif
+	int ret = 0;
 	if (buffer && size) {
-		return msync(buffer, size, MS_SYNC) == 0;
+		ret = msync(buffer, size, MS_SYNC);
 	}
-	return fsync(vfd->fd) == 0;
+	if (!ret) {
+		ret = fsync(vfd->fd);
+	}
+#ifdef __EMSCRIPTEN__
+	EM_ASM(FS.syncfs(function (err) { assert(!err); }));
+#endif
+	return ret;
 #else
 	HANDLE h = (HANDLE) _get_osfhandle(vfd->fd);
 	FILETIME ft;

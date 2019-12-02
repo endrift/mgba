@@ -67,9 +67,6 @@ typedef intptr_t ssize_t;
 
 #ifndef MGBA_STANDALONE
 #include <mgba-util/dllexports.h>
-#elif __EMSCRIPTEN__
-#define MGBA_EXPORT EMSCRIPTEN_KEEPALIVE
-#define MGBA_NO_EXPORT
 #else
 #define MGBA_EXPORT
 #define MGBA_NO_EXPORT
