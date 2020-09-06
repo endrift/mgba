@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include <mgba/feature/video-logger.h>
 
-#include <mgba/core/core.h>
 #include <mgba-util/memory.h>
 #include <mgba-util/vfs.h>
 #include <mgba-util/math.h>
@@ -183,7 +182,7 @@ void mVideoLoggerRendererWriteVideoRegister(struct mVideoLogger* logger, uint32_
 }
 
 void mVideoLoggerRendererWriteVRAM(struct mVideoLogger* logger, uint32_t address) {
-	int bit = 1 << (address >> 12);
+	int bit = 1U << (address >> 12);
 	if (logger->vramDirtyBitmap[address >> 17] & bit) {
 		return;
 	}
@@ -297,11 +296,16 @@ bool mVideoLoggerRendererRun(struct mVideoLogger* logger, bool block) {
 		mVideoLoggerRendererRunInjected(logger);
 		ignorePackets = channel->ignorePackets;
 	}
+	struct mVideoLoggerDirtyInfo buffer = {0};
 	struct mVideoLoggerDirtyInfo item = {0};
-	while (logger->readData(logger, &item, sizeof(item), block)) {
+	while (logger->readData(logger, &buffer, sizeof(buffer), block)) {
+		LOAD_32LE(item.type, 0, &buffer.type);
 		if (ignorePackets & (1 << item.type)) {
 			continue;
 		}
+		LOAD_32LE(item.address, 0, &buffer.address);
+		LOAD_32LE(item.value, 0, &buffer.value);
+		LOAD_32LE(item.value2, 0, &buffer.value2);
 		switch (item.type) {
 		case DIRTY_SCANLINE:
 			if (channel && channel->injectionPoint == LOGGER_INJECTION_FIRST_SCANLINE && !channel->injecting && item.address == 0) {
@@ -724,7 +728,7 @@ static void _flushBuffer(struct mVideoLogContext* context) {
 	}
 }
 
-void mVideoLogContextDestroy(struct mCore* core, struct mVideoLogContext* context) {
+void mVideoLogContextDestroy(struct mCore* core, struct mVideoLogContext* context, bool closeVF) {
 	if (context->write) {
 		_flushBuffer(context);
 
@@ -750,6 +754,10 @@ void mVideoLogContextDestroy(struct mCore* core, struct mVideoLogContext* contex
 			context->channels[i].inflating = false;
 		}
 #endif
+	}
+
+	if (closeVF && context->backing) {
+		context->backing->close(context->backing);
 	}
 
 	free(context);
@@ -997,7 +1005,7 @@ static ssize_t mVideoLoggerReadChannel(struct mVideoLogChannel* channel, void* d
 		data = (uint8_t*) data + size;
 		length -= size;
 	}
-	if (!_fillBuffer(context, channelId, BUFFER_BASE_SIZE)) {
+	if (channel->injecting || !_fillBuffer(context, channelId, BUFFER_BASE_SIZE)) {
 		return size;
 	}
 	size += CircleBufferRead(buffer, data, length);
@@ -1033,7 +1041,7 @@ static ssize_t mVideoLoggerWriteChannel(struct mVideoLogChannel* channel, const 
 	return read;
 }
 
-struct mCore* mVideoLogCoreFind(struct VFile* vf) {
+static const struct mVLDescriptor* _mVideoLogDescriptor(struct VFile* vf) {
 	if (!vf) {
 		return NULL;
 	}
@@ -1054,6 +1062,25 @@ struct mCore* mVideoLogCoreFind(struct VFile* vf) {
 		if (platform == descriptor->platform) {
 			break;
 		}
+	}
+	if (descriptor->platform == PLATFORM_NONE) {
+		return NULL;
+	}
+	return descriptor;
+}
+
+enum mPlatform mVideoLogIsCompatible(struct VFile* vf) {
+	const struct mVLDescriptor* descriptor = _mVideoLogDescriptor(vf);
+	if (descriptor) {
+		return descriptor->platform;
+	}
+	return PLATFORM_NONE;
+}
+
+struct mCore* mVideoLogCoreFind(struct VFile* vf) {
+	const struct mVLDescriptor* descriptor = _mVideoLogDescriptor(vf);
+	if (!descriptor) {
+		return NULL;
 	}
 	struct mCore* core = NULL;
 	if (descriptor->open) {

@@ -26,6 +26,8 @@
 #include <mgba-util/memory.h>
 #include <mgba-util/vfs.h>
 
+#include "libretro_core_options.h"
+
 #define SAMPLES 1024
 #define RUMBLE_PWM 35
 
@@ -49,7 +51,7 @@ static void _stopImage(struct mImageSource*);
 static void _requestImage(struct mImageSource*, const void** buffer, size_t* stride, enum mColorFormat* colorFormat);
 
 static struct mCore* core;
-static void* outputBuffer;
+static color_t* outputBuffer = NULL;
 static void* data;
 static size_t dataSize;
 static void* savedata;
@@ -76,6 +78,7 @@ static void _reloadSettings(void) {
 	};
 
 	struct retro_variable var;
+#ifdef M_CORE_GB
 	enum GBModel model;
 	const char* modelName;
 
@@ -99,6 +102,7 @@ static void _reloadSettings(void) {
 		mCoreConfigSetDefaultValue(&core->config, "sgb.model", modelName);
 		mCoreConfigSetDefaultValue(&core->config, "cgb.model", modelName);
 	}
+#endif
 
 	var.key = "mgba_use_bios";
 	var.value = 0;
@@ -112,14 +116,18 @@ static void _reloadSettings(void) {
 		opts.skipBios = strcmp(var.value, "ON") == 0;
 	}
 
+#ifdef M_CORE_GB
 	var.key = "mgba_sgb_borders";
 	var.value = 0;
 	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-		if (strcmp(var.value, "ON") == 0) {
-			mCoreConfigSetDefaultIntValue(&core->config, "sgb.borders", true);
-		} else {
-			mCoreConfigSetDefaultIntValue(&core->config, "sgb.borders", false);
-		}
+		mCoreConfigSetDefaultIntValue(&core->config, "sgb.borders", strcmp(var.value, "ON") == 0);
+	}
+#endif
+
+	var.key = "mgba_frameskip";
+	var.value = 0;
+	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+		opts.frameskip = strtol(var.value, NULL, 10);
 	}
 
 	var.key = "mgba_idle_optimization";
@@ -134,13 +142,6 @@ static void _reloadSettings(void) {
 		}
 	}
 
-	var.key = "mgba_frameskip";
-	var.value = 0;
-	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-		opts.frameskip = strtol(var.value, NULL, 10);
-
-	}
-
 	mCoreConfigLoadDefaults(&core->config, &opts);
 	mCoreLoadConfig(core);
 }
@@ -152,19 +153,7 @@ unsigned retro_api_version(void) {
 void retro_set_environment(retro_environment_t env) {
 	environCallback = env;
 
-	struct retro_variable vars[] = {
-		{ "mgba_solar_sensor_level", "Solar sensor level; 0|1|2|3|4|5|6|7|8|9|10" },
-		{ "mgba_allow_opposing_directions", "Allow opposing directional input; OFF|ON" },
-		{ "mgba_gb_model", "Game Boy model (requires restart); Autodetect|Game Boy|Super Game Boy|Game Boy Color|Game Boy Advance" },
-		{ "mgba_use_bios", "Use BIOS file if found (requires restart); ON|OFF" },
-		{ "mgba_skip_bios", "Skip BIOS intro (requires restart); OFF|ON" },
-		{ "mgba_sgb_borders", "Use Super Game Boy borders (requires restart); ON|OFF" },
-		{ "mgba_idle_optimization", "Idle loop removal; Remove Known|Detect and Remove|Don't Remove" },
-		{ "mgba_frameskip", "Frameskip; 0|1|2|3|4|5|6|7|8|9|10" },
-		{ 0, 0 }
-	};
-
-	environCallback(RETRO_ENVIRONMENT_SET_VARIABLES, vars);
+	libretro_set_core_options(environCallback);
 }
 
 void retro_set_video_refresh(retro_video_refresh_t video) {
@@ -189,7 +178,11 @@ void retro_set_input_state(retro_input_state_t input) {
 
 void retro_get_system_info(struct retro_system_info* info) {
 	info->need_fullpath = false;
-	info->valid_extensions = "gba|gb|gbc";
+#ifdef M_CORE_GB
+	info->valid_extensions = "gba|gb|gbc|sgb";
+#else
+	info->valid_extensions = "gba";
+#endif
 	info->library_version = projectVersion;
 	info->library_name = projectName;
 	info->block_extract = false;
@@ -297,25 +290,15 @@ void retro_run(void) {
 			.value = 0
 		};
 		if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-			struct GBA* gba = core->board;
-			struct GB* gb = core->board;
-			switch (core->platform(core)) {
-			case PLATFORM_GBA:
-				gba->allowOpposingDirections = strcmp(var.value, "yes") == 0;
-				break;
-			case PLATFORM_GB:
-				gb->allowOpposingDirections = strcmp(var.value, "yes") == 0;
-				break;
-			default:
-				break;
-			}
+			mCoreConfigSetIntValue(&core->config, "allowOpposingDirections", strcmp(var.value, "yes") == 0);
+			core->reloadConfigOption(core, "allowOpposingDirections", NULL);
 		}
 
 		var.key = "mgba_frameskip";
 		var.value = 0;
 		if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
-			mCoreConfigSetUIntValue(&core->config, "frameskip", strtol(var.value, NULL, 10));
-			mCoreLoadConfig(core);
+			mCoreConfigSetIntValue(&core->config, "frameskip", strtol(var.value, NULL, 10));
+			core->reloadConfigOption(core, "frameskip", NULL);
 		}
 	}
 
@@ -446,6 +429,102 @@ static void _setupMaps(struct mCore* core) {
 
 		mmaps.descriptors = descs;
 		mmaps.num_descriptors = sizeof(descs) / sizeof(descs[0]);
+
+		bool yes = true;
+		environCallback(RETRO_ENVIRONMENT_SET_MEMORY_MAPS, &mmaps);
+		environCallback(RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS, &yes);
+	}
+#endif
+#ifdef M_CORE_GB
+	if (core->platform(core) == PLATFORM_GB) {
+		struct GB* gb = core->board;
+		struct retro_memory_descriptor descs[11];
+		struct retro_memory_map mmaps;
+
+		memset(descs, 0, sizeof(descs));
+		size_t savedataSize = retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
+
+		unsigned i = 0;
+
+		/* Map ROM */
+		descs[i].ptr    = gb->memory.rom;
+		descs[i].start  = GB_BASE_CART_BANK0;
+		descs[i].len    = GB_SIZE_CART_BANK0;
+		descs[i].flags  = RETRO_MEMDESC_CONST;
+		i++;
+
+		descs[i].ptr    = gb->memory.rom;
+		descs[i].offset = GB_SIZE_CART_BANK0;
+		descs[i].start  = GB_BASE_CART_BANK1;
+		descs[i].len    = GB_SIZE_CART_BANK0;
+		descs[i].flags  = RETRO_MEMDESC_CONST;
+		i++;
+
+		/* Map VRAM */
+		descs[i].ptr    = gb->video.vram;
+		descs[i].start  = GB_BASE_VRAM;
+		descs[i].len    = GB_SIZE_VRAM_BANK0;
+		i++;
+
+		/* Map working RAM */
+		descs[i].ptr    = gb->memory.wram;
+		descs[i].start  = GB_BASE_WORKING_RAM_BANK0;
+		descs[i].len    = GB_SIZE_WORKING_RAM_BANK0;
+		i++;
+
+		descs[i].ptr    = gb->memory.wram;
+		descs[i].offset = GB_SIZE_WORKING_RAM_BANK0;
+		descs[i].start  = GB_BASE_WORKING_RAM_BANK1;
+		descs[i].len    = GB_SIZE_WORKING_RAM_BANK0;
+		i++;
+
+		/* Map OAM */
+		descs[i].ptr    = &gb->video.oam; /* video.oam is a structure */
+		descs[i].start  = GB_BASE_OAM;
+		descs[i].len    = GB_SIZE_OAM;
+		descs[i].select = 0xFFFFFF60;
+		i++;
+
+		/* Map mmapped I/O */
+		descs[i].ptr    = gb->memory.io;
+		descs[i].start  = GB_BASE_IO;
+		descs[i].len    = GB_SIZE_IO;
+		i++;
+
+		/* Map High RAM */
+		descs[i].ptr    = gb->memory.hram;
+		descs[i].start  = GB_BASE_HRAM;
+		descs[i].len    = GB_SIZE_HRAM;
+		descs[i].select = 0xFFFFFF80;
+		i++;
+
+		/* Map IE Register */
+		descs[i].ptr    = &gb->memory.ie;
+		descs[i].start  = GB_BASE_IE;
+		descs[i].len    = 1;
+		i++;
+
+		/* Map External RAM */
+		if (gb->memory.sram) {
+			descs[i].ptr    = gb->memory.sram;
+			descs[i].start  = GB_BASE_EXTERNAL_RAM;
+			descs[i].len    = savedataSize;
+			i++;
+		}
+
+		if (gb->model >= GB_MODEL_CGB) {
+			/* Map working RAM */
+			/* banks 2-7 of wram mapped in virtual address so it can be
+			 * accessed without bank switching, GBC only */
+			descs[i].ptr    = gb->memory.wram + 0x2000;
+			descs[i].start  = 0x10000;
+			descs[i].len    = GB_SIZE_WORKING_RAM - 0x2000;
+			descs[i].select = 0xFFFFA000;
+			i++;
+		}
+
+		mmaps.descriptors = descs;
+		mmaps.num_descriptors = i;
 
 		bool yes = true;
 		environCallback(RETRO_ENVIRONMENT_SET_MEMORY_MAPS, &mmaps);
@@ -824,6 +903,7 @@ static void _updateCamera(const uint32_t* buffer, unsigned width, unsigned heigh
 	if (!camData || width > camWidth || height > camHeight) {
 		if (camData) {
 			free(camData);
+			camData = NULL;
 		}
 		unsigned bufPitch = pitch / sizeof(*buffer);
 		unsigned bufHeight = height;

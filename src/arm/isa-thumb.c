@@ -25,6 +25,12 @@
 	cpu->cpsr.c = ARM_BORROW_FROM(M, N, D); \
 	cpu->cpsr.v = ARM_V_SUBTRACTION(M, N, D);
 
+#define THUMB_SUBTRACTION_CARRY_S(M, N, D, C) \
+	cpu->cpsr.n = ARM_SIGN(D); \
+	cpu->cpsr.z = !(D); \
+	cpu->cpsr.c = ARM_BORROW_FROM_CARRY(M, N, D, C); \
+	cpu->cpsr.v = ARM_V_SUBTRACTION(M, N, D);
+
 #define THUMB_NEUTRAL_S(M, N, D) \
 	cpu->cpsr.n = ARM_SIGN(D); \
 	cpu->cpsr.z = !(D);
@@ -157,6 +163,7 @@ DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(LSL2,
 			cpu->gprs[rd] = 0;
 		}
 	}
+	++currentCycles;
 	THUMB_NEUTRAL_S( , , cpu->gprs[rd]))
 
 DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(LSR2,
@@ -174,6 +181,7 @@ DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(LSR2,
 			cpu->gprs[rd] = 0;
 		}
 	}
+	++currentCycles;
 	THUMB_NEUTRAL_S( , , cpu->gprs[rd]))
 
 DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(ASR2,
@@ -191,6 +199,7 @@ DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(ASR2,
 			}
 		}
 	}
+	++currentCycles;
 	THUMB_NEUTRAL_S( , , cpu->gprs[rd]))
 
 DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(ADC,
@@ -200,10 +209,11 @@ DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(ADC,
 	THUMB_ADDITION_S(d, n, cpu->gprs[rd]);)
 
 DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(SBC,
-	int n = cpu->gprs[rn] + !cpu->cpsr.c;
+	int n = cpu->gprs[rn];
 	int d = cpu->gprs[rd];
-	cpu->gprs[rd] = d - n;
-	THUMB_SUBTRACTION_S(d, n, cpu->gprs[rd]);)
+	cpu->gprs[rd] = d - n - !cpu->cpsr.c;
+	THUMB_SUBTRACTION_CARRY_S(d, n, cpu->gprs[rd], !cpu->cpsr.c);)
+
 DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(ROR,
 	int rs = cpu->gprs[rn] & 0xFF;
 	if (rs) {
@@ -215,6 +225,7 @@ DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(ROR,
 			cpu->cpsr.c = ARM_SIGN(cpu->gprs[rd]);
 		}
 	}
+	++currentCycles;
 	THUMB_NEUTRAL_S( , , cpu->gprs[rd]);)
 DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(TST, int32_t aluOut = cpu->gprs[rd] & cpu->gprs[rn]; THUMB_NEUTRAL_S(cpu->gprs[rd], cpu->gprs[rn], aluOut))
 DEFINE_DATA_FORM_5_INSTRUCTION_THUMB(NEG, THUMB_SUBTRACTION(cpu->gprs[rd], 0, cpu->gprs[rn]))

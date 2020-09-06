@@ -28,7 +28,9 @@ static inline uint32_t rotl32 ( uint32_t x, int8_t r ) {
 // handle aligned reads, do the conversion here
 
 static FORCE_INLINE uint32_t getblock32 ( const uint32_t * p, int i ) {
-  return p[i];
+  uint32_t ret;
+  LOAD_32LE(ret, i << 2, p);
+  return ret;
 }
 
 //-----------------------------------------------------------------------------
@@ -60,7 +62,8 @@ uint32_t hash32(const void* key, int len, uint32_t seed) {
 
   const uint32_t * blocks = (const uint32_t *)(data + nblocks*4);
 
-  for(int i = -nblocks; i; i++)
+  int i;
+  for(i = -nblocks; i; i++)
   {
     uint32_t k1 = getblock32(blocks,i);
 
@@ -82,10 +85,15 @@ uint32_t hash32(const void* key, int len, uint32_t seed) {
 
   switch(len & 3)
   {
-  case 3: k1 ^= tail[2] << 16;
-  case 2: k1 ^= tail[1] << 8;
-  case 1: k1 ^= tail[0];
-          k1 *= c1; k1 = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
+  case 3:
+    k1 ^= tail[2] << 16;
+    // Fall through
+  case 2:
+    k1 ^= tail[1] << 8;
+    // Fall through
+  case 1:
+    k1 ^= tail[0];
+    k1 *= c1; k1 = ROTL32(k1,15); k1 *= c2; h1 ^= k1;
   };
 
   //----------

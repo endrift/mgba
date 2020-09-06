@@ -249,6 +249,9 @@ void mSDLDetachPlayer(struct mSDLEvents* events, struct mSDLPlayer* player) {
 	}
 	--events->playersAttached;
 	CircleBufferDeinit(&player->rotation.zHistory);
+#if SDL_VERSION_ATLEAST(2, 0, 0)
+	CircleBufferDeinit(&player->rumble.history);
+#endif
 }
 
 void mSDLPlayerLoadConfig(struct mSDLPlayer* context, const struct Configuration* config) {
@@ -351,6 +354,13 @@ void mSDLUpdateJoysticks(struct mSDLEvents* events, const struct Configuration* 
 			if (!sdlJoystick) {
 				continue;
 			}
+			ssize_t joysticks[MAX_PLAYERS];
+			ssize_t i;
+			// Pointers can get invalidated, so we'll need to refresh them
+			for (i = 0; i < events->playersAttached && i < MAX_PLAYERS; ++i) {
+				joysticks[i] = events->players[i]->joystick ? (ssize_t) SDL_JoystickListIndex(&events->joysticks, events->players[i]->joystick) : -1;
+				events->players[i]->joystick = NULL;
+			}
 			struct SDL_JoystickCombo* joystick = SDL_JoystickListAppend(&events->joysticks);
 			joystick->joystick = sdlJoystick;
 			joystick->id = SDL_JoystickInstanceID(joystick->joystick);
@@ -358,8 +368,12 @@ void mSDLUpdateJoysticks(struct mSDLEvents* events, const struct Configuration* 
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 			joystick->haptic = SDL_HapticOpenFromJoystick(joystick->joystick);
 #endif
+			for (i = 0; i < events->playersAttached && i < MAX_PLAYERS; ++i) {
+				if (joysticks[i] != -1) {
+					events->players[i]->joystick = SDL_JoystickListGetPointer(&events->joysticks, joysticks[i]);
+				}
+			}
 
-			size_t i;
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 			char joystickName[34] = {0};
 			SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(joystick->joystick), joystickName, sizeof(joystickName));
@@ -386,7 +400,11 @@ void mSDLUpdateJoysticks(struct mSDLEvents* events, const struct Configuration* 
 					continue;
 				}
 				events->players[i]->joystick = joystick;
-				if (config && joystickName) {
+				if (config
+#if !SDL_VERSION_ATLEAST(2, 0, 0)
+					&& joystickName
+#endif
+					) {
 					mInputProfileLoad(events->players[i]->bindings, SDL_BINDING_BUTTON, config, joystickName);
 				}
 				break;

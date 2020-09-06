@@ -81,9 +81,7 @@ CoreController::CoreController(mCore* core, QObject* parent)
 
 		controller->m_resetActions.clear();
 
-		if (!controller->m_hwaccel) {
-			context->core->setVideoBuffer(context->core, reinterpret_cast<color_t*>(controller->m_activeBuffer.data()), controller->screenDimensions().width());
-		}
+		context->core->setVideoBuffer(context->core, reinterpret_cast<color_t*>(controller->m_activeBuffer.data()), controller->screenDimensions().width());
 
 		QMetaObject::invokeMethod(controller, "didReset");
 		controller->finishFrame();
@@ -358,14 +356,12 @@ void CoreController::setLogger(LogController* logger) {
 }
 
 void CoreController::start() {
-	if (!m_hwaccel) {
-		QSize size(256, 224);
-		m_activeBuffer.resize(size.width() * size.height() * sizeof(color_t));
-		m_activeBuffer.fill(0xFF);
-		m_completeBuffer = m_activeBuffer;
+	QSize size(256, 224);
+	m_activeBuffer.resize(size.width() * size.height() * sizeof(color_t));
+	m_activeBuffer.fill(0xFF);
+	m_completeBuffer = m_activeBuffer;
 
-		m_threadContext.core->setVideoBuffer(m_threadContext.core, reinterpret_cast<color_t*>(m_activeBuffer.data()), size.width());
-	}
+	m_threadContext.core->setVideoBuffer(m_threadContext.core, reinterpret_cast<color_t*>(m_activeBuffer.data()), size.width());
 
 	if (!m_patched) {
 		mCoreAutoloadPatch(m_threadContext.core);
@@ -684,6 +680,32 @@ void CoreController::setFakeEpoch(const QDateTime& time) {
 	m_threadContext.core->rtc.value = time.toMSecsSinceEpoch();
 }
 
+void CoreController::scanCard(const QString& path) {
+#ifdef M_CORE_GBA
+	QImage image(path);
+	if (image.isNull()) {
+		QFile file(path);
+		file.open(QIODevice::ReadOnly);
+		m_eReaderData = file.read(2912);
+	} else if (image.size() == QSize(989, 44)) {
+		const uchar* bits = image.constBits();
+		size_t size;
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 10, 0))
+		size = image.sizeInBytes();
+#else
+		size = image.byteCount();
+#endif
+		m_eReaderData.setRawData(reinterpret_cast<const char*>(bits), size);
+	}
+
+	mCoreThreadRunFunction(&m_threadContext, [](mCoreThread* thread) {
+		CoreController* controller = static_cast<CoreController*>(thread->userData);
+		GBAEReaderQueueCard(static_cast<GBA*>(thread->core->board), controller->m_eReaderData.constData(), controller->m_eReaderData.size());
+	});
+#endif
+}
+
+
 void CoreController::importSharkport(const QString& path) {
 #ifdef M_CORE_GBA
 	if (platform() != PLATFORM_GBA) {
@@ -849,9 +871,8 @@ void CoreController::endVideoLog(bool closeVf) {
 	}
 
 	Interrupter interrupter(this);
-	mVideoLogContextDestroy(m_threadContext.core, m_vl);
-	if (m_vlVf && closeVf) {
-		m_vlVf->close(m_vlVf);
+	mVideoLogContextDestroy(m_threadContext.core, m_vl, closeVf);
+	if (closeVf) {
 		m_vlVf = nullptr;
 	}
 	m_vl = nullptr;
@@ -860,10 +881,22 @@ void CoreController::endVideoLog(bool closeVf) {
 void CoreController::setFramebufferHandle(int fb) {
 	Interrupter interrupter(this);
 	if (fb < 0) {
+		if (!m_hwaccel) {
+			return;
+		}
+		mCoreConfigSetIntValue(&m_threadContext.core->config, "hwaccelVideo", 0);
+		m_threadContext.core->setVideoGLTex(m_threadContext.core, -1);
 		m_hwaccel = false;
 	} else {
+		mCoreConfigSetIntValue(&m_threadContext.core->config, "hwaccelVideo", 1);
 		m_threadContext.core->setVideoGLTex(m_threadContext.core, fb);
+		if (m_hwaccel) {
+			return;
+		}
 		m_hwaccel = true;
+	}
+	if (hasStarted()) {
+		m_threadContext.core->reloadConfigOption(m_threadContext.core, "hwaccelVideo", NULL);
 	}
 }
 

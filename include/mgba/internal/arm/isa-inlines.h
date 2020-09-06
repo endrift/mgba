@@ -99,15 +99,69 @@ static inline void _ARMReadCPSR(struct ARMCore* cpu) {
 	cpu->irqh.readCPSR(cpu);
 }
 
+static inline uint32_t _ARMInstructionLength(struct ARMCore* cpu) {
+	return cpu->cpsr.t == MODE_ARM ? WORD_SIZE_ARM : WORD_SIZE_THUMB;
+}
+
 static inline uint32_t _ARMPCAddress(struct ARMCore* cpu) {
-	int instructionLength;
-	enum ExecutionMode mode = cpu->cpsr.t;
-	if (mode == MODE_ARM) {
-		instructionLength = WORD_SIZE_ARM;
-	} else {
-		instructionLength = WORD_SIZE_THUMB;
+	return cpu->gprs[ARM_PC] - _ARMInstructionLength(cpu) * 2;
+}
+
+static inline bool ARMTestCondition(struct ARMCore* cpu, unsigned condition) {
+	switch (condition) {
+		case 0x0:
+			return ARM_COND_EQ;
+		case 0x1:
+			return ARM_COND_NE;
+		case 0x2:
+			return ARM_COND_CS;
+		case 0x3:
+			return ARM_COND_CC;
+		case 0x4:
+			return ARM_COND_MI;
+		case 0x5:
+			return ARM_COND_PL;
+		case 0x6:
+			return ARM_COND_VS;
+		case 0x7:
+			return ARM_COND_VC;
+		case 0x8:
+			return ARM_COND_HI;
+		case 0x9:
+			return ARM_COND_LS;
+		case 0xA:
+			return ARM_COND_GE;
+		case 0xB:
+			return ARM_COND_LT;
+		case 0xC:
+			return ARM_COND_GT;
+		case 0xD:
+			return ARM_COND_LE;
+		default:
+			return true;
 	}
-	return cpu->gprs[ARM_PC] - instructionLength * 2;
+}
+
+static inline enum RegisterBank ARMSelectBank(enum PrivilegeMode mode) {
+	switch (mode) {
+	case MODE_USER:
+	case MODE_SYSTEM:
+		// No banked registers
+		return BANK_NONE;
+	case MODE_FIQ:
+		return BANK_FIQ;
+	case MODE_IRQ:
+		return BANK_IRQ;
+	case MODE_SUPERVISOR:
+		return BANK_SUPERVISOR;
+	case MODE_ABORT:
+		return BANK_ABORT;
+	case MODE_UNDEFINED:
+		return BANK_UNDEFINED;
+	default:
+		// This should be unreached
+		return BANK_NONE;
+	}
 }
 
 #endif

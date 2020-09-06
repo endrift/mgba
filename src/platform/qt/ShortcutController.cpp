@@ -45,8 +45,11 @@ void ShortcutController::updateKey(const QString& name, int keySequence) {
 
 void ShortcutController::updateKey(std::shared_ptr<Shortcut> item, int keySequence) {
 	int oldShortcut = item->shortcut();
-	if (m_actions->isHeld(item->name())) {
+	if (oldShortcut != keySequence && m_actions->isHeld(item->name())) {
 		if (oldShortcut > 0) {
+			if (item->action() && item->action()->booleanAction()) {
+				item->action()->booleanAction()(false);
+			}
 			m_heldKeys.take(oldShortcut);
 		}
 		if (keySequence > 0) {
@@ -156,7 +159,11 @@ bool ShortcutController::eventFilter(QObject*, QEvent* event) {
 		}
 		Action* action = item.value()->action();
 		if (action) {
-			action->trigger();
+			if (m_actions->isHeld(action->name())) {
+				action->trigger(true);
+			} else {
+				action->trigger(!action->isActive());
+			}
 		}
 		event->accept();
 		return true;
@@ -167,7 +174,7 @@ bool ShortcutController::eventFilter(QObject*, QEvent* event) {
 			return false;
 		}
 		Action* action = item.value()->action();
-		if (action) {
+		if (action && m_actions->isHeld(action->name())) {
 			action->trigger(false);
 		}
 		event->accept();
@@ -181,7 +188,15 @@ bool ShortcutController::eventFilter(QObject*, QEvent* event) {
 		}
 		Action* action = item.value()->action();
 		if (action) {
-			action->trigger(gae->isNew());
+			if (gae->isNew()) {
+				if (m_actions->isHeld(action->name())) {
+					action->trigger(true);
+				} else {
+					action->trigger(!action->isActive());
+				}
+			} else if (m_actions->isHeld(action->name())) {
+				action->trigger(false);
+			}
 		}
 		event->accept();
 		return true;

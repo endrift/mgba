@@ -75,6 +75,7 @@ public slots:
 	void selectSave(bool temporary);
 	void selectState(bool load);
 	void selectPatch();
+	void scanCard();
 	void enterFullScreen();
 	void exitFullScreen();
 	void toggleFullScreen();
@@ -130,6 +131,7 @@ private slots:
 
 	void reloadAudioDriver();
 	void reloadDisplayDriver();
+	void changeRenderer();
 
 	void tryMakePortable();
 	void mustRestart();
@@ -155,12 +157,14 @@ private:
 	void updateMRU();
 
 	void openView(QWidget* widget);
+	void attachDisplay();
 
 	template <typename T, typename... A> std::function<void()> openTView(A... arg);
 	template <typename T, typename... A> std::function<void()> openControllerTView(A... arg);
 
 	Action* addGameAction(const QString& visibleName, const QString& name, Action::Function action, const QString& menu = {}, const QKeySequence& = {});
 	template<typename T, typename V> Action* addGameAction(const QString& visibleName, const QString& name, T* obj, V (T::*action)(), const QString& menu = {}, const QKeySequence& = {});
+	template<typename V> Action* addGameAction(const QString& visibleName, const QString& name, V (CoreController::*action)(), const QString& menu = {}, const QKeySequence& = {});
 	Action* addGameAction(const QString& visibleName, const QString& name, Action::BooleanFunction action, const QString& menu = {}, const QKeySequence& = {});
 
 	void updateTitle(float fps = -1);

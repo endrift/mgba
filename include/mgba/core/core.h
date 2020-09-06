@@ -70,7 +70,7 @@ struct mCore {
 	void (*loadConfig)(struct mCore*, const struct mCoreConfig*);
 	void (*reloadConfigOption)(struct mCore*, const char* option, const struct mCoreConfig*);
 
-	void (*desiredVideoDimensions)(struct mCore*, unsigned* width, unsigned* height);
+	void (*desiredVideoDimensions)(const struct mCore*, unsigned* width, unsigned* height);
 	void (*setVideoBuffer)(struct mCore*, color_t* buffer, size_t stride);
 	void (*setVideoGLTex)(struct mCore*, unsigned texid);
 
@@ -201,6 +201,7 @@ void mCoreLoadForeignConfig(struct mCore* core, const struct mCoreConfig* config
 void mCoreSetRTC(struct mCore* core, struct mRTCSource* rtc);
 
 void* mCoreGetMemoryBlock(struct mCore* core, uint32_t start, size_t* size);
+void* mCoreGetMemoryBlockMasked(struct mCore* core, uint32_t start, size_t* size, uint32_t mask);
 
 #ifdef USE_ELF
 struct ELF;

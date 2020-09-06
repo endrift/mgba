@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE TS>
-<TS version="2.1" language="kr" sourcelanguage="en_US">
+<TS version="2.1" language="ko" sourcelanguage="en_US">
 <context>
     <name>AboutScreen</name>
     <message>
@@ -24,9 +24,9 @@
         <translation>{projectName}은 Patreon의 다음 고객에게 감사드립니다:</translation>
     </message>
     <message>
-        <source>© 2013 – 2016 Jeffrey Pfau, licensed under the Mozilla Public License, version 2.0
+        <source>© 2013 – 2020 Jeffrey Pfau, licensed under the Mozilla Public License, version 2.0
 Game Boy Advance is a registered trademark of Nintendo Co., Ltd.</source>
-        <translation>© 2013 - 2016 Jeffrey Pfau, 모질라 공식 라이센스 버전 2.0에 따라 사용 허가되었습니다.
+        <translation>© 2013 - 2020 Jeffrey Pfau, 모질라 공식 라이센스 버전 2.0에 따라 사용 허가되었습니다.
 Game Boy Advance는 Nintendo Co., Ltd.의 등록 상표입니다.</translation>
     </message>
     <message>

@@ -7,7 +7,7 @@
 
 #include <mgba/internal/gb/io.h>
 #include <mgba/internal/gb/timer.h>
-#include <mgba/internal/lr35902/lr35902.h>
+#include <mgba/internal/sm83/sm83.h>
 
 #include <mgba-util/memory.h>
 
@@ -23,6 +23,7 @@ void GBSerialize(struct GB* gb, struct GBSerializedState* state) {
 	STORE_32LE(GB_SAVESTATE_MAGIC + GB_SAVESTATE_VERSION, 0, &state->versionMagic);
 	STORE_32LE(gb->romCrc32, 0, &state->romCrc32);
 	STORE_32LE(gb->timing.masterCycles, 0, &state->masterCycles);
+	STORE_64LE(gb->timing.globalCycles, 0, &state->globalCycles);
 
 	if (gb->memory.rom) {
 		memcpy(state->title, ((struct GBCartridge*) &gb->memory.rom[0x100])->titleLong, sizeof(state->title));
@@ -55,6 +56,8 @@ void GBSerialize(struct GB* gb, struct GBSerializedState* state) {
 	flags = GBSerializedCpuFlagsSetIrqPending(flags, gb->cpu->irqPending);
 	flags = GBSerializedCpuFlagsSetDoubleSpeed(flags, gb->doubleSpeed);
 	flags = GBSerializedCpuFlagsSetEiPending(flags, mTimingIsScheduled(&gb->timing, &gb->eiPending));
+	flags = GBSerializedCpuFlagsSetHalted(flags, gb->cpu->halted);
+	flags = GBSerializedCpuFlagsSetBlocked(flags, gb->cpuBlocked);
 	STORE_32LE(flags, 0, &state->cpu.flags);
 	STORE_32LE(gb->eiPending.when - mTimingCurrentTime(&gb->timing), 0, &state->cpu.eiPending);
 
@@ -104,11 +107,11 @@ bool GBDeserialize(struct GB* gb, const struct GBSerializedState* state) {
 		mLOG(GB_STATE, WARN, "Savestate is corrupted: CPU cycles are negative");
 		error = true;
 	}
-	if (state->cpu.executionState != LR35902_CORE_FETCH) {
+	if (state->cpu.executionState != SM83_CORE_FETCH) {
 		mLOG(GB_STATE, WARN, "Savestate is corrupted: Execution state is not FETCH");
 		error = true;
 	}
-	if (check >= (int32_t) DMG_LR35902_FREQUENCY) {
+	if (check >= (int32_t) DMG_SM83_FREQUENCY) {
 		mLOG(GB_STATE, WARN, "Savestate is corrupted: CPU cycles are too high");
 		error = true;
 	}
@@ -150,6 +153,7 @@ bool GBDeserialize(struct GB* gb, const struct GBSerializedState* state) {
 	}
 	mTimingClear(&gb->timing);
 	LOAD_32LE(gb->timing.masterCycles, 0, &state->masterCycles);
+	LOAD_64LE(gb->timing.globalCycles, 0, &state->globalCycles);
 
 	gb->cpu->a = state->cpu.a;
 	gb->cpu->f.packed = state->cpu.f;
@@ -171,6 +175,9 @@ bool GBDeserialize(struct GB* gb, const struct GBSerializedState* state) {
 	gb->cpu->condition = GBSerializedCpuFlagsGetCondition(flags);
 	gb->cpu->irqPending = GBSerializedCpuFlagsGetIrqPending(flags);
 	gb->doubleSpeed = GBSerializedCpuFlagsGetDoubleSpeed(flags);
+	gb->cpu->halted = GBSerializedCpuFlagsGetHalted(flags);
+	gb->cpuBlocked = GBSerializedCpuFlagsGetBlocked(flags);
+
 	gb->audio.timingFactor = gb->doubleSpeed + 1;
 
 	LOAD_32LE(gb->cpu->cycles, 0, &state->cpu.cycles);
@@ -181,6 +188,8 @@ bool GBDeserialize(struct GB* gb, const struct GBSerializedState* state) {
 	LOAD_32LE(when, 0, &state->cpu.eiPending);
 	if (GBSerializedCpuFlagsIsEiPending(flags)) {
 		mTimingSchedule(&gb->timing, &gb->eiPending, when);
+	} else {
+		gb->eiPending.when = when + mTimingCurrentTime(&gb->timing);
 	}
 
 	gb->model = state->model;

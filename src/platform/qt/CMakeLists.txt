@@ -16,7 +16,7 @@ if(BUILD_SDL)
 endif()
 
 if(POLICY CMP0071)
-	cmake_policy(SET CMP0071 OLD)
+	cmake_policy(SET CMP0071 NEW)
 endif()
 
 set(CMAKE_AUTOMOC ON)
@@ -43,6 +43,10 @@ if(APPLE)
 	if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
 	endif()
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
 endif()
 
 get_target_property(QT_TYPE Qt5::Core TYPE)
@@ -150,6 +154,7 @@ set(GBA_SRC
 	GBAOverride.cpp)
 
 set(GB_SRC
+	GameBoy.cpp
 	GBOverride.cpp
 	PrinterView.cpp)
 
@@ -282,6 +287,10 @@ qt5_wrap_ui(UI_SRC ${UI_FILES})
 add_executable(${BINARY_NAME}-qt WIN32 MACOSX_BUNDLE main.cpp ${CMAKE_SOURCE_DIR}/res/mgba.icns ${SOURCE_FILES} ${PLATFORM_SRC} ${UI_SRC} ${AUDIO_SRC} ${RESOURCES})
 set_target_properties(${BINARY_NAME}-qt PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/res/info.plist.in COMPILE_DEFINITIONS "${FEATURE_DEFINES};${FUNCTION_DEFINES};${OS_DEFINES};${QT_DEFINES}" COMPILE_OPTIONS "${FEATURE_FLAGS}")
 
+if(WIN32)
+	set_target_properties(${BINARY_NAME}-qt PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endif()
+
 list(APPEND QT_LIBRARIES Qt5::Widgets Qt5::Network)
 if(BUILD_GL OR BUILD_GLES2 OR BUILD_EPOXY)
 	list(APPEND QT_LIBRARIES Qt5::OpenGL ${OPENGL_LIBRARY} ${OPENGLES2_LIBRARY})
@@ -289,7 +298,10 @@ endif()
 if(QT_STATIC)
 	find_library(QTPCRE NAMES qtpcre2 qtpcre)
 	if(WIN32)
-		list(APPEND QT_LIBRARIES qwindows dwmapi imm32 uxtheme Qt5EventDispatcherSupport Qt5FontDatabaseSupport Qt5ThemeSupport Qt5WindowsUIAutomationSupport)
+		if(CMAKE_CROSSCOMPILING)
+			set(QWINDOWS_DEPS Qt5EventDispatcherSupport Qt5FontDatabaseSupport Qt5ThemeSupport Qt5WindowsUIAutomationSupport)
+		endif()
+		list(APPEND QT_LIBRARIES Qt5::QWindowsIntegrationPlugin ${QWINDOWS_DEPS} amstrmid dwmapi uxtheme imm32 -static-libgcc -static-libstdc++)
 		set_target_properties(Qt5::Core PROPERTIES INTERFACE_LINK_LIBRARIES "${QTPCRE};version;winmm;ssl;crypto;ws2_32;iphlpapi;crypt32;userenv;netapi32;wtsapi32")
 		set_target_properties(Qt5::Gui PROPERTIES INTERFACE_LINK_LIBRARIES ${OPENGL_LIBRARY} ${OPENGLES2_LIBRARY})
 	elseif(APPLE)

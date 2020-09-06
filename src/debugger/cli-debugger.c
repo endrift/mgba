@@ -13,7 +13,7 @@
 #include <mgba-util/string.h>
 #include <mgba-util/vfs.h>
 
-#if ENABLE_SCRIPTING
+#ifdef ENABLE_SCRIPTING
 #include <mgba/core/scripting.h>
 #endif
 
@@ -69,12 +69,19 @@ static void _dumpWord(struct CLIDebugger*, struct CLIDebugVector*);
 #ifdef ENABLE_SCRIPTING
 static void _source(struct CLIDebugger*, struct CLIDebugVector*);
 #endif
+static void _backtrace(struct CLIDebugger*, struct CLIDebugVector*);
+static void _finish(struct CLIDebugger*, struct CLIDebugVector*);
+static void _setStackTraceMode(struct CLIDebugger*, struct CLIDebugVector*);
+static void _setSymbol(struct CLIDebugger*, struct CLIDebugVector*);
+static void _findSymbol(struct CLIDebugger*, struct CLIDebugVector*);
 
 static struct CLIDebuggerCommandSummary _debuggerCommands[] = {
+	{ "backtrace", _backtrace, "i", "Print backtrace of all or specified frames" },
 	{ "break", _setBreakpoint, "Is", "Set a breakpoint" },
 	{ "continue", _continue, "", "Continue execution" },
 	{ "delete", _clearBreakpoint, "I", "Delete a breakpoint or watchpoint" },
 	{ "disassemble", _disassemble, "Ii", "Disassemble instructions" },
+	{ "finish", _finish, "", "Execute until current stack frame returns" },
 	{ "help", _printHelp, "S", "Print help" },
 	{ "listb", _listBreakpoints, "", "List breakpoints" },
 	{ "listw", _listWatchpoints, "", "List watchpoints" },
@@ -87,7 +94,10 @@ static struct CLIDebuggerCommandSummary _debuggerCommands[] = {
 	{ "r/1", _readByte, "I", "Read a byte from a specified offset" },
 	{ "r/2", _readHalfword, "I", "Read a halfword from a specified offset" },
 	{ "r/4", _readWord, "I", "Read a word from a specified offset" },
+	{ "set", _setSymbol, "SI", "Assign a symbol to an address" },
+	{ "stack", _setStackTraceMode, "S", "Change the stack tracing mode" },
 	{ "status", _printStatus, "", "Print the current status" },
+	{ "symbol", _findSymbol, "I", "Find the symbol name for an address" },
 	{ "trace", _trace, "Is", "Trace a number of instructions" },
 	{ "w/1", _writeByte, "II", "Write a byte at a specified offset" },
 	{ "w/2", _writeHalfword, "II", "Write a halfword at a specified offset" },
@@ -111,6 +121,7 @@ static struct CLIDebuggerCommandSummary _debuggerCommands[] = {
 
 static struct CLIDebuggerCommandAlias _debuggerCommandAliases[] = {
 	{ "b", "break" },
+	{ "bt", "backtrace" },
 	{ "c", "continue" },
 	{ "d", "delete" },
 	{ "dis", "disassemble" },
@@ -126,6 +137,7 @@ static struct CLIDebuggerCommandAlias _debuggerCommandAliases[] = {
 	{ "p/x", "print/x" },
 	{ "q", "quit" },
 	{ "w", "watch" },
+	{ ".", "source" },
 	{ 0, 0 }
 };
 
@@ -153,14 +165,30 @@ static void _breakInto(struct CLIDebugger* debugger, struct CLIDebugVector* dv) 
 }
 #endif
 
+static bool CLIDebuggerCheckTraceMode(struct CLIDebugger* debugger, bool requireEnabled) {
+	struct mDebuggerPlatform* platform = debugger->d.platform;
+	if (!platform->getStackTraceMode) {
+		debugger->backend->printf(debugger->backend, "Stack tracing is not supported by this platform.\n");
+		return false;
+	} else if (requireEnabled && platform->getStackTraceMode(platform) == STACK_TRACE_DISABLED) {
+		debugger->backend->printf(debugger->backend, "Stack tracing is not enabled.\n");
+		return false;
+	}
+	return true;
+}
+
 static void _continue(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 	UNUSED(dv);
-	debugger->d.state = debugger->traceRemaining != 0 ? DEBUGGER_CUSTOM : DEBUGGER_RUNNING;
+	debugger->d.state = debugger->traceRemaining != 0 ? DEBUGGER_CALLBACK : DEBUGGER_RUNNING;
 }
 
 static void _next(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 	UNUSED(dv);
+	struct mDebuggerPlatform* platform = debugger->d.platform;
 	debugger->d.core->step(debugger->d.core);
+	if (platform->getStackTraceMode && platform->getStackTraceMode(platform) != STACK_TRACE_DISABLED) {
+		platform->updateStackTrace(platform);
+	}
 	_printStatus(debugger, 0);
 }
 
@@ -174,7 +202,7 @@ static bool _parseExpression(struct mDebugger* debugger, struct CLIDebugVector* 
 	for (accum = dv; accum; accum = accum->next) {
 		++args;
 	}
-	const char** arglist = malloc(sizeof(const char*) * (args + 1));
+	const char** arglist = calloc(args + 1, sizeof(const char*));
 	args = 0;
 	for (accum = dv; accum; accum = accum->next) {
 		arglist[args] = accum->charValue;
@@ -327,6 +355,7 @@ static void _readByte(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 
 static void _reset(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 	UNUSED(dv);
+	mStackTraceClear(&debugger->d.stackTrace);
 	debugger->d.core->reset(debugger->d.core);
 	_printStatus(debugger, 0);
 }
@@ -700,7 +729,7 @@ static void _trace(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 		debugger->traceVf = VFileOpen(dv->next->charValue, O_CREAT | O_WRONLY | O_APPEND);
 	}
 	if (_doTrace(debugger)) {
-		debugger->d.state = DEBUGGER_CUSTOM;
+		debugger->d.state = DEBUGGER_CALLBACK;
 	} else {
 		debugger->system->printStatus(debugger->system);
 	}
@@ -709,7 +738,6 @@ static void _trace(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 static bool _doTrace(struct CLIDebugger* debugger) {
 	char trace[1024];
 	trace[sizeof(trace) - 1] = '\0';
-	debugger->d.core->step(debugger->d.core);
 	size_t traceSize = sizeof(trace) - 2;
 	debugger->d.platform->trace(debugger->d.platform, trace, &traceSize);
 	if (traceSize + 1 <= sizeof(trace)) {
@@ -884,6 +912,7 @@ static int _tryCommands(struct CLIDebugger* debugger, struct CLIDebuggerCommandS
 					if (dvNext->type == CLIDV_ERROR_TYPE) {
 						debugger->backend->printf(debugger->backend, "Parse error\n");
 						_DVFree(dv);
+						_DVFree(dvNext);
 						return 0;
 					}
 
@@ -916,7 +945,7 @@ static int _tryCommands(struct CLIDebugger* debugger, struct CLIDebuggerCommandS
 	return -1;
 }
 
-static bool _parse(struct CLIDebugger* debugger, const char* line, size_t count) {
+bool CLIDebuggerRunCommand(struct CLIDebugger* debugger, const char* line, size_t count) {
 	const char* firstSpace = strchr(line, ' ');
 	size_t cmdLength;
 	if (firstSpace) {
@@ -956,10 +985,10 @@ static void _commandLine(struct mDebugger* debugger) {
 		if (line[0] == '\n') {
 			line = cliDebugger->backend->historyLast(cliDebugger->backend, &len);
 			if (line && len) {
-				_parse(cliDebugger, line, len);
+				CLIDebuggerRunCommand(cliDebugger, line, len);
 			}
 		} else {
-			_parse(cliDebugger, line, len);
+			CLIDebuggerRunCommand(cliDebugger, line, len);
 			cliDebugger->backend->historyAppend(cliDebugger->backend, line);
 		}
 	}
@@ -977,9 +1006,9 @@ static void _reportEntry(struct mDebugger* debugger, enum mDebuggerEntryReason r
 	case DEBUGGER_ENTER_BREAKPOINT:
 		if (info) {
 			if (info->pointId > 0) {
-				cliDebugger->backend->printf(cliDebugger->backend, "Hit breakpoint %zi at 0x%08X\n", info->pointId, info->address);
+				cliDebugger->backend->printf(cliDebugger->backend, "Hit breakpoint %" PRIz "i at 0x%08X\n", info->pointId, info->address);
 			} else {
-				cliDebugger->backend->printf(cliDebugger->backend, "Hit unknown breakpoint at 0x%08X\n", info->address);				
+				cliDebugger->backend->printf(cliDebugger->backend, "Hit unknown breakpoint at 0x%08X\n", info->address);
 			}
 		} else {
 			cliDebugger->backend->printf(cliDebugger->backend, "Hit breakpoint\n");
@@ -988,9 +1017,9 @@ static void _reportEntry(struct mDebugger* debugger, enum mDebuggerEntryReason r
 	case DEBUGGER_ENTER_WATCHPOINT:
 		if (info) {
 			if (info->type.wp.accessType & WATCHPOINT_WRITE) {
-				cliDebugger->backend->printf(cliDebugger->backend, "Hit watchpoint %zi at 0x%08X: (new value = 0x%08X, old value = 0x%08X)\n", info->pointId, info->address, info->type.wp.newValue, info->type.wp.oldValue);
+				cliDebugger->backend->printf(cliDebugger->backend, "Hit watchpoint %" PRIz "i at 0x%08X: (new value = 0x%08X, old value = 0x%08X)\n", info->pointId, info->address, info->type.wp.newValue, info->type.wp.oldValue);
 			} else {
-				cliDebugger->backend->printf(cliDebugger->backend, "Hit watchpoint %zi at 0x%08X: (value = 0x%08X)\n", info->pointId, info->address, info->type.wp.oldValue);
+				cliDebugger->backend->printf(cliDebugger->backend, "Hit watchpoint %" PRIz "i at 0x%08X: (value = 0x%08X)\n", info->pointId, info->address, info->type.wp.oldValue);
 			}
 		} else {
 			cliDebugger->backend->printf(cliDebugger->backend, "Hit watchpoint\n");
@@ -1002,6 +1031,24 @@ static void _reportEntry(struct mDebugger* debugger, enum mDebuggerEntryReason r
 		} else {
 			cliDebugger->backend->printf(cliDebugger->backend, "Hit illegal opcode\n");
 		}
+		break;
+	case DEBUGGER_ENTER_STACK:
+		if (info) {
+			if (info->type.st.traceType == STACK_TRACE_BREAK_ON_CALL) {
+				struct mStackTrace* stack = &cliDebugger->d.stackTrace;
+				struct mStackFrame* frame = mStackTraceGetFrame(stack, 0);
+				if (frame->interrupt) {
+					cliDebugger->backend->printf(cliDebugger->backend, "Hit interrupt at at 0x%08X\n", info->address);
+				} else {
+					cliDebugger->backend->printf(cliDebugger->backend, "Hit function call at at 0x%08X\n", info->address);
+				}
+			} else {
+				cliDebugger->backend->printf(cliDebugger->backend, "Hit function return at at 0x%08X\n", info->address);
+			}
+		} else {
+			cliDebugger->backend->printf(cliDebugger->backend, "Hit function call or return\n");
+		}
+		_backtrace(cliDebugger, NULL);
 		break;
 	}
 }
@@ -1044,7 +1091,7 @@ static void _cliDebuggerCustom(struct mDebugger* debugger) {
 	if (cliDebugger->system) {
 		retain = cliDebugger->system->custom(cliDebugger->system) && retain;
 	}
-	if (!retain && debugger->state == DEBUGGER_CUSTOM) {
+	if (!retain && debugger->state == DEBUGGER_CALLBACK) {
 		debugger->state = next;
 	}
 }
@@ -1130,4 +1177,113 @@ bool CLIDebuggerTabComplete(struct CLIDebugger* debugger, const char* token, boo
 	debugger->backend->lineAppend(debugger->backend, name);
 	debugger->backend->lineAppend(debugger->backend, " ");
 	return true;
+}
+
+static void _backtrace(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
+	if (!CLIDebuggerCheckTraceMode(debugger, true)) {
+		return;
+	}
+	struct mStackTrace* stack = &debugger->d.stackTrace;
+	ssize_t frames = mStackTraceGetDepth(stack);
+	if (dv && dv->type == CLIDV_INT_TYPE && dv->intValue < frames) {
+		frames = dv->intValue;
+	}
+	ssize_t i;
+	struct mDebuggerSymbols* symbolTable = debugger->d.core->symbolTable;
+	for (i = 0; i < frames; ++i) {
+		char trace[1024];
+		size_t traceSize = sizeof(trace) - 2;
+		mStackTraceFormatFrame(stack, symbolTable, i, trace, &traceSize);
+		debugger->backend->printf(debugger->backend, "%s", trace);
+	}
+}
+
+static void _finish(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
+	UNUSED(dv);
+	if (!CLIDebuggerCheckTraceMode(debugger, true)) {
+		return;
+	}
+	struct mStackTrace* stack = &debugger->d.stackTrace;
+	struct mStackFrame* frame = mStackTraceGetFrame(stack, 0);
+	if (!frame) {
+		debugger->backend->printf(debugger->backend, "No current stack frame.\n");
+		return;
+	}
+	frame->breakWhenFinished = true;
+	_continue(debugger, dv);
+}
+
+static void _setStackTraceMode(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
+	if (!CLIDebuggerCheckTraceMode(debugger, false)) {
+		return;
+	}
+	if (!dv) {
+		debugger->backend->printf(debugger->backend, "off           disable stack tracing (default)\n");
+		debugger->backend->printf(debugger->backend, "trace-only    enable stack tracing\n");
+		debugger->backend->printf(debugger->backend, "break-call    break on function calls\n");
+		debugger->backend->printf(debugger->backend, "break-return  break on function returns\n");
+		debugger->backend->printf(debugger->backend, "break-all     break on function calls and returns\n");
+		return;
+	}
+	if (dv->type != CLIDV_CHAR_TYPE) {
+		debugger->backend->printf(debugger->backend, "%s\n", ERROR_INVALID_ARGS);
+		return;
+	}
+	struct mDebuggerPlatform* platform = debugger->d.platform;
+	if (strcmp(dv->charValue, "off") == 0) {
+		platform->setStackTraceMode(platform, STACK_TRACE_DISABLED);
+	} else if (strcmp(dv->charValue, "trace-only") == 0) {
+		platform->setStackTraceMode(platform, STACK_TRACE_ENABLED);
+	} else if (strcmp(dv->charValue, "break-call") == 0) {
+		platform->setStackTraceMode(platform, STACK_TRACE_BREAK_ON_CALL);
+	} else if (strcmp(dv->charValue, "break-return") == 0) {
+		platform->setStackTraceMode(platform, STACK_TRACE_BREAK_ON_RETURN);
+	} else if (strcmp(dv->charValue, "break-all") == 0) {
+		platform->setStackTraceMode(platform, STACK_TRACE_BREAK_ON_BOTH);
+	} else {
+		debugger->backend->printf(debugger->backend, "%s\n", ERROR_INVALID_ARGS);
+	}
+}
+
+static void _setSymbol(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
+	struct mDebuggerSymbols* symbolTable = debugger->d.core->symbolTable;
+	if (!symbolTable) {
+		debugger->backend->printf(debugger->backend, "No symbol table available.\n");
+		return;
+	}
+	if (!dv || !dv->next) {
+		debugger->backend->printf(debugger->backend, "%s\n", ERROR_MISSING_ARGS);
+		return;
+	}
+	if (dv->type != CLIDV_CHAR_TYPE || dv->next->type != CLIDV_INT_TYPE) {
+		debugger->backend->printf(debugger->backend, "%s\n", ERROR_INVALID_ARGS);
+		return;
+	}
+	mDebuggerSymbolAdd(symbolTable, dv->charValue, dv->next->intValue, dv->next->segmentValue);
+}
+
+static void _findSymbol(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
+	struct mDebuggerSymbols* symbolTable = debugger->d.core->symbolTable;
+	if (!symbolTable) {
+		debugger->backend->printf(debugger->backend, "No symbol table available.\n");
+		return;
+	}
+	if (!dv) {
+		debugger->backend->printf(debugger->backend, "%s\n", ERROR_MISSING_ARGS);
+		return;
+	}
+	if (dv->type != CLIDV_INT_TYPE) {
+		debugger->backend->printf(debugger->backend, "%s\n", ERROR_INVALID_ARGS);
+		return;
+	}
+	const char* name = mDebuggerSymbolReverseLookup(symbolTable, dv->intValue, dv->segmentValue);
+	if (name) {
+		if (dv->segmentValue >= 0) {
+			debugger->backend->printf(debugger->backend, " 0x%02X:%08X = %s\n", dv->segmentValue, dv->intValue, name);
+		} else {
+			debugger->backend->printf(debugger->backend, " 0x%08X = %s\n", dv->intValue, name);
+		}
+	} else {
+		debugger->backend->printf(debugger->backend, "Not found.\n");
+	}
 }

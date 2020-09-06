@@ -16,23 +16,22 @@
 #ifndef DISABLE_THREADING
 
 static const float _defaultFPSTarget = 60.f;
+static ThreadLocal _contextKey;
 
 #ifdef USE_PTHREADS
-static pthread_key_t _contextKey;
 static pthread_once_t _contextOnce = PTHREAD_ONCE_INIT;
 
 static void _createTLS(void) {
-	pthread_key_create(&_contextKey, 0);
+	ThreadLocalInitKey(&_contextKey);
 }
 #elif _WIN32
-static DWORD _contextKey;
 static INIT_ONCE _contextOnce = INIT_ONCE_STATIC_INIT;
 
 static BOOL CALLBACK _createTLS(PINIT_ONCE once, PVOID param, PVOID* context) {
 	UNUSED(once);
 	UNUSED(param);
 	UNUSED(context);
-	_contextKey = TlsAlloc();
+	ThreadLocalInitKey(&_contextKey);
 	return TRUE;
 }
 #endif
@@ -144,12 +143,11 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 	struct mCoreThread* threadContext = context;
 #ifdef USE_PTHREADS
 	pthread_once(&_contextOnce, _createTLS);
-	pthread_setspecific(_contextKey, threadContext);
 #elif _WIN32
 	InitOnceExecuteOnce(&_contextOnce, _createTLS, NULL, 0);
-	TlsSetValue(_contextKey, threadContext);
 #endif
 
+	ThreadLocalSetKey(_contextKey, threadContext);
 	ThreadSetName("CPU Thread");
 
 #if !defined(_WIN32) && defined(USE_PTHREADS)
@@ -620,27 +618,14 @@ void mCoreThreadStopWaiting(struct mCoreThread* threadContext) {
 	MutexUnlock(&threadContext->impl->stateMutex);
 }
 
+struct mCoreThread* mCoreThreadGet(void) {
 #ifdef USE_PTHREADS
-struct mCoreThread* mCoreThreadGet(void) {
 	pthread_once(&_contextOnce, _createTLS);
-	return pthread_getspecific(_contextKey);
-}
 #elif _WIN32
-struct mCoreThread* mCoreThreadGet(void) {
 	InitOnceExecuteOnce(&_contextOnce, _createTLS, NULL, 0);
-	return TlsGetValue(_contextKey);
-}
-#else
-struct mCoreThread* mCoreThreadGet(void) {
-	return NULL;
-}
 #endif
-
-#else
-struct mCoreThread* mCoreThreadGet(void) {
-	return NULL;
+	return ThreadLocalGetValue(_contextKey);
 }
-#endif
 
 static void _mCoreLog(struct mLogger* logger, int category, enum mLogLevel level, const char* format, va_list args) {
 	UNUSED(logger);
@@ -650,11 +635,14 @@ static void _mCoreLog(struct mLogger* logger, int category, enum mLogLevel level
 	printf("\n");
 	struct mCoreThread* thread = mCoreThreadGet();
 	if (thread && level == mLOG_FATAL) {
-#ifndef DISABLE_THREADING
 		mCoreThreadMarkCrashed(thread);
-#endif
 	}
 }
+#else
+struct mCoreThread* mCoreThreadGet(void) {
+	return NULL;
+}
+#endif
 
 struct mLogger* mCoreThreadLogger(void) {
 	struct mCoreThread* thread = mCoreThreadGet();

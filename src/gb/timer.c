@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include <mgba/internal/gb/timer.h>
 
-#include <mgba/internal/lr35902/lr35902.h>
+#include <mgba/internal/sm83/sm83.h>
 #include <mgba/internal/gb/gb.h>
 #include <mgba/internal/gb/io.h>
 #include <mgba/internal/gb/serialize.h>
@@ -140,8 +140,10 @@ void GBTimerDeserialize(struct GBTimer* timer, const struct GBSerializedState* s
 
 	GBSerializedTimerFlags flags = state->timer.flags;
 
+	LOAD_32LE(when, 0, &state->timer.nextIRQ);
 	if (GBSerializedTimerFlagsIsIrqPending(flags)) {
-		LOAD_32LE(when, 0, &state->timer.nextIRQ);
 		mTimingSchedule(&timer->p->timing, &timer->irq, when);
+	} else {
+		timer->irq.when = when + mTimingCurrentTime(&timer->p->timing);
 	}
 }

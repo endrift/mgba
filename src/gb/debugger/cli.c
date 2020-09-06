@@ -10,26 +10,30 @@
 #include <mgba/internal/gb/gb.h>
 #include <mgba/internal/gb/io.h>
 #include <mgba/internal/gb/video.h>
-#include <mgba/internal/lr35902/debugger/cli-debugger.h>
+#include <mgba/internal/sm83/debugger/cli-debugger.h>
 
 static void _GBCLIDebuggerInit(struct CLIDebuggerSystem*);
 static bool _GBCLIDebuggerCustom(struct CLIDebuggerSystem*);
 
 static void _frame(struct CLIDebugger*, struct CLIDebugVector*);
+#if !defined(MINIMAL_CORE) || MINIMAL_CORE < 2
 static void _load(struct CLIDebugger*, struct CLIDebugVector*);
 static void _save(struct CLIDebugger*, struct CLIDebugVector*);
+#endif
 
 struct CLIDebuggerCommandSummary _GBCLIDebuggerCommands[] = {
 	{ "frame", _frame, "", "Frame advance" },
+#if !defined(MINIMAL_CORE) || MINIMAL_CORE < 2
 	{ "load", _load, "*", "Load a savestate" },
 	{ "save", _save, "*", "Save a savestate" },
+#endif
 	{ 0, 0, 0, 0 }
 };
 
 struct CLIDebuggerSystem* GBCLIDebuggerCreate(struct mCore* core) {
 	UNUSED(core);
 	struct GBCLIDebugger* debugger = malloc(sizeof(struct GBCLIDebugger));
-	LR35902CLIDebuggerCreate(&debugger->d);
+	SM83CLIDebuggerCreate(&debugger->d);
 	debugger->d.init = _GBCLIDebuggerInit;
 	debugger->d.deinit = NULL;
 	debugger->d.custom = _GBCLIDebuggerCustom;
@@ -66,13 +70,14 @@ static bool _GBCLIDebuggerCustom(struct CLIDebuggerSystem* debugger) {
 
 static void _frame(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 	UNUSED(dv);
-	debugger->d.state = DEBUGGER_CUSTOM;
+	debugger->d.state = DEBUGGER_CALLBACK;
 
 	struct GBCLIDebugger* gbDebugger = (struct GBCLIDebugger*) debugger->system;
 	gbDebugger->frameAdvance = true;
 	gbDebugger->inVblank = GBRegisterSTATGetMode(((struct GB*) gbDebugger->core->board)->memory.io[REG_STAT]) == 1;
 }
 
+#if !defined(MINIMAL_CORE) || MINIMAL_CORE < 2
 static void _load(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 	struct CLIDebuggerBackend* be = debugger->backend;
 	if (!dv || dv->type != CLIDV_INT_TYPE) {
@@ -106,3 +111,4 @@ static void _save(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 
 	mCoreSaveState(gbDebugger->core, dv->intValue, SAVESTATE_SCREENSHOT | SAVESTATE_RTC | SAVESTATE_METADATA);
 }
+#endif

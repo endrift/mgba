@@ -213,6 +213,8 @@ static void GBVideoSoftwareRendererInit(struct GBVideoRenderer* renderer, enum G
 		softwareRenderer->lookup[i] = i;
 		softwareRenderer->lookup[i] = i;
 	}
+
+	memset(softwareRenderer->palette, 0, sizeof(softwareRenderer->palette));
 }
 
 static void GBVideoSoftwareRendererDeinit(struct GBVideoRenderer* renderer) {
@@ -705,7 +707,9 @@ static void GBVideoSoftwareRendererFinishFrame(struct GBVideoRenderer* renderer)
 		case SGB_PAL_TRN:
 		case SGB_CHR_TRN:
 		case SGB_PCT_TRN:
-			if (softwareRenderer->sgbTransfer > 0 && softwareRenderer->sgbBorders && !renderer->sgbRenderMode) {
+		case SGB_ATRC_EN:
+		case SGB_MASK_EN:
+			if (softwareRenderer->sgbBorders && !renderer->sgbRenderMode) {
 				// Make sure every buffer sees this if we're multibuffering
 				_regenerateSGBBorder(softwareRenderer);
 			}

@@ -7,11 +7,15 @@
 
 #include "CoreController.h"
 #include "LogController.h"
+#include "VFileDevice.h"
 
 #include <QDir>
 
 #ifdef M_CORE_GBA
 #include <mgba/gba/core.h>
+#endif
+#ifdef M_CORE_GB
+#include <mgba/gb/core.h>
 #endif
 
 #include <mgba/core/core.h>
@@ -25,6 +29,57 @@ void CoreManager::setConfig(const mCoreConfig* config) {
 
 void CoreManager::setMultiplayerController(MultiplayerController* multiplayer) {
 	m_multiplayer = multiplayer;
+}
+
+QByteArray CoreManager::getExtdata(const QString& filename, mStateExtdataTag extdataType) {
+	VFileDevice vf(filename, QIODevice::ReadOnly);
+
+	if (!vf.isOpen()) {
+		return {};
+	}
+
+	mStateExtdata extdata;
+	mStateExtdataInit(&extdata);
+
+	QByteArray bytes;
+	auto extract = [&bytes, &extdata, &vf, extdataType](mCore* core) -> bool {
+		if (mCoreExtractExtdata(core, vf, &extdata)) {
+			mStateExtdataItem extitem;
+			if (!mStateExtdataGet(&extdata, extdataType, &extitem)) {
+				return false;
+			}
+			if (extitem.size) {
+				bytes = QByteArray::fromRawData(static_cast<const char*>(extitem.data), extitem.size);
+			}
+			return true;
+		}
+		return false;
+	};
+
+	bool done = false;
+	struct mCore* core = nullptr;
+#ifdef USE_PNG
+	done = extract(nullptr);
+#endif
+#ifdef M_CORE_GBA
+	if (!done) {
+		core = GBACoreCreate();
+		core->init(core);
+		done = extract(core);
+		core->deinit(core);
+	}
+#endif
+#ifdef M_CORE_GB
+	if (!done) {
+		core = GBCoreCreate();
+		core->init(core);
+		done = extract(core);
+		core->deinit(core);
+	}
+#endif
+
+	mStateExtdataDeinit(&extdata);
+	return bytes;
 }
 
 CoreController* CoreManager::loadGame(const QString& path) {
@@ -65,7 +120,7 @@ CoreController* CoreManager::loadGame(const QString& path) {
 		if (vfOriginal && (size = vfOriginal->size(vfOriginal)) > 0) {
 			void* mem = vfOriginal->map(vfOriginal, size, MAP_READ);
 			vf = VFileMemChunk(mem, size);
-			vfOriginal->unmap(vfOriginal, mem, (size_t) read);
+			vfOriginal->unmap(vfOriginal, mem, size);
 			vfOriginal->close(vfOriginal);
 		}
 	}
@@ -83,6 +138,8 @@ CoreController* CoreManager::loadGame(VFile* vf, const QString& path, const QStr
 
 	mCore* core = mCoreFindVF(vf);
 	if (!core) {
+		vf->close(vf);
+		LOG(QT, ERROR) << tr("Could not load game. Are you sure it's in the correct format?");
 		return nullptr;
 	}
 
@@ -108,7 +165,9 @@ CoreController* CoreManager::loadGame(VFile* vf, const QString& path, const QStr
 	}
 	bytes = info.dir().canonicalPath().toUtf8();
 	mDirectorySetAttachBase(&core->dirs, VDirOpen(bytes.constData()));
-	mCoreAutoloadSave(core);
+	if (!mCoreAutoloadSave(core)) {
+		LOG(QT, ERROR) << tr("Failed to open save file. Is the save directory writable?");
+	}
 	mCoreAutoloadCheats(core);
 
 	CoreController* cc = new CoreController(core);

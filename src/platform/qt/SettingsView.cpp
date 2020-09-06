@@ -15,15 +15,15 @@
 #include "ShaderSelector.h"
 #include "ShortcutView.h"
 
+#ifdef M_CORE_GB
+#include "GameBoy.h"
+#endif
+
 #include <mgba/core/serialize.h>
 #include <mgba/core/version.h>
 #include <mgba/internal/gba/gba.h>
 
 using namespace QGBA;
-
-#ifdef M_CORE_GB
-QList<enum GBModel> SettingsView::s_gbModelList;
-#endif
 
 SettingsView::SettingsView(ConfigController* controller, InputController* inputController, ShortcutController* shortcutController, LogController* logController, QWidget* parent)
 	: QDialog(parent, Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint)
@@ -33,14 +33,19 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 	m_ui.setupUi(this);
 
 #ifdef M_CORE_GB
-	if (s_gbModelList.isEmpty()) {
-		// NB: Keep in sync with SettingsView.ui
-		s_gbModelList.append(GB_MODEL_AUTODETECT);
-		s_gbModelList.append(GB_MODEL_DMG);
-		s_gbModelList.append(GB_MODEL_SGB);
-		s_gbModelList.append(GB_MODEL_CGB);
-		s_gbModelList.append(GB_MODEL_AGB);
+	for (auto model : GameBoy::modelList()) {
+		m_ui.gbModel->addItem(GameBoy::modelName(model), model);
+		m_ui.sgbModel->addItem(GameBoy::modelName(model), model);
+		m_ui.cgbModel->addItem(GameBoy::modelName(model), model);
+		m_ui.cgbHybridModel->addItem(GameBoy::modelName(model), model);
+		m_ui.cgbSgbModel->addItem(GameBoy::modelName(model), model);
 	}
+
+	m_ui.gbModel->setCurrentIndex(m_ui.gbModel->findData(GB_MODEL_DMG));
+	m_ui.sgbModel->setCurrentIndex(m_ui.gbModel->findData(GB_MODEL_SGB));
+	m_ui.cgbModel->setCurrentIndex(m_ui.gbModel->findData(GB_MODEL_CGB));
+	m_ui.cgbHybridModel->setCurrentIndex(m_ui.gbModel->findData(GB_MODEL_CGB));
+	m_ui.cgbSgbModel->setCurrentIndex(m_ui.gbModel->findData(GB_MODEL_CGB));
 #endif
 
 	reloadConfig();
@@ -303,6 +308,9 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 			continue;
 		}
 		QLocale locale(name.remove(QString("%0-").arg(binaryName)).remove(".qm"));
+		if (locale.language() == QLocale::English) {
+			continue;
+		}
 		m_ui.languages->addItem(locale.nativeLanguageName(), locale);
 		if (locale.bcp47Name() == QLocale().bcp47Name()) {
 			m_ui.languages->setCurrentIndex(m_ui.languages->count() - 1);
@@ -400,6 +408,7 @@ void SettingsView::updateConfig() {
 	saveSetting("showFps", m_ui.showFps);
 	saveSetting("cheatAutoload", m_ui.cheatAutoload);
 	saveSetting("cheatAutosave", m_ui.cheatAutosave);
+	saveSetting("showFilename", m_ui.showFilename);
 	saveSetting("autoload", m_ui.autoload);
 	saveSetting("autosave", m_ui.autosave);
 	saveSetting("logToFile", m_ui.logToFile);
@@ -493,12 +502,13 @@ void SettingsView::updateConfig() {
 	}
 
 	int videoScale = m_controller->getOption("videoScale", 1).toInt();
+	saveSetting("videoScale", m_ui.videoScale);
+
 	int hwaccelVideo = m_controller->getOption("hwaccelVideo").toInt();
-	if (videoScale != m_ui.videoScale->value() || hwaccelVideo != m_ui.hwaccelVideo->currentIndex()) {
+	saveSetting("hwaccelVideo", m_ui.hwaccelVideo->currentIndex());
+	if (hwaccelVideo != m_ui.hwaccelVideo->currentIndex()) {
 		emit videoRendererChanged();
 	}
-	saveSetting("videoScale", m_ui.videoScale);
-	saveSetting("hwaccelVideo", m_ui.hwaccelVideo->currentIndex());
 
 	m_logModel.save(m_controller);
 	m_logModel.logger()->setLogFile(m_ui.logFile->text());
@@ -506,14 +516,30 @@ void SettingsView::updateConfig() {
 	m_logModel.logger()->logToStdout(m_ui.logToStdout->isChecked());
 
 #ifdef M_CORE_GB
-	GBModel modelGB = s_gbModelList[m_ui.gbModel->currentIndex()];
-	m_controller->setOption("gb.model", GBModelToName(modelGB));
+	QVariant modelGB = m_ui.gbModel->currentData();
+	if (modelGB.isValid()) {
+		m_controller->setOption("gb.model", GBModelToName(static_cast<GBModel>(modelGB.toInt())));
+	}
 
-	GBModel modelSGB = s_gbModelList[m_ui.sgbModel->currentIndex()];
-	m_controller->setOption("sgb.model", GBModelToName(modelSGB));
+	QVariant modelSGB = m_ui.sgbModel->currentData();
+	if (modelSGB.isValid()) {
+		m_controller->setOption("sgb.model", GBModelToName(static_cast<GBModel>(modelSGB.toInt())));
+	}
 
-	GBModel modelCGB = s_gbModelList[m_ui.cgbModel->currentIndex()];
-	m_controller->setOption("cgb.model", GBModelToName(modelCGB));
+	QVariant modelCGB = m_ui.cgbModel->currentData();
+	if (modelCGB.isValid()) {
+		m_controller->setOption("cgb.model", GBModelToName(static_cast<GBModel>(modelCGB.toInt())));
+	}
+
+	QVariant modelCGBHybrid = m_ui.cgbHybridModel->currentData();
+	if (modelCGBHybrid.isValid()) {
+		m_controller->setOption("cgb.hybridModel", GBModelToName(static_cast<GBModel>(modelCGBHybrid.toInt())));
+	}
+
+	QVariant modelCGBSGB = m_ui.cgbSgbModel->currentData();
+	if (modelCGBSGB.isValid()) {
+		m_controller->setOption("cgb.sgbModel", GBModelToName(static_cast<GBModel>(modelCGBSGB.toInt())));
+	}
 
 	for (int colorId = 0; colorId < 12; ++colorId) {
 		if (!(m_gbColors[colorId] & 0xFF000000)) {
@@ -573,6 +599,7 @@ void SettingsView::reloadConfig() {
 	loadSetting("showFps", m_ui.showFps, true);
 	loadSetting("cheatAutoload", m_ui.cheatAutoload, true);
 	loadSetting("cheatAutosave", m_ui.cheatAutosave, true);
+	loadSetting("showFilename", m_ui.showFilename, false);
 	loadSetting("autoload", m_ui.autoload, true);
 	loadSetting("autosave", m_ui.autosave, false);
 	loadSetting("logToFile", m_ui.logToFile);
@@ -635,22 +662,36 @@ void SettingsView::reloadConfig() {
 	QString modelGB = m_controller->getOption("gb.model");
 	if (!modelGB.isNull()) {
 		GBModel model = GBNameToModel(modelGB.toUtf8().constData());
-		int index = s_gbModelList.indexOf(model);
+		int index = m_ui.gbModel->findData(model);
 		m_ui.gbModel->setCurrentIndex(index >= 0 ? index : 0);
 	}
 
 	QString modelSGB = m_controller->getOption("sgb.model");
 	if (!modelSGB.isNull()) {
 		GBModel model = GBNameToModel(modelSGB.toUtf8().constData());
-		int index = s_gbModelList.indexOf(model);
+		int index = m_ui.sgbModel->findData(model);
 		m_ui.sgbModel->setCurrentIndex(index >= 0 ? index : 0);
 	}
 
 	QString modelCGB = m_controller->getOption("cgb.model");
 	if (!modelCGB.isNull()) {
 		GBModel model = GBNameToModel(modelCGB.toUtf8().constData());
-		int index = s_gbModelList.indexOf(model);
+		int index = m_ui.cgbModel->findData(model);
 		m_ui.cgbModel->setCurrentIndex(index >= 0 ? index : 0);
+	}
+
+	QString modelCGBHybrid = m_controller->getOption("cgb.hybridModel");
+	if (!modelCGBHybrid.isNull()) {
+		GBModel model = GBNameToModel(modelCGBHybrid.toUtf8().constData());
+		int index = m_ui.cgbHybridModel->findData(model);
+		m_ui.cgbHybridModel->setCurrentIndex(index >= 0 ? index : 0);
+	}
+
+	QString modelCGBSGB = m_controller->getOption("cgb.sgbModel");
+	if (!modelCGBSGB.isNull()) {
+		GBModel model = GBNameToModel(modelCGBSGB.toUtf8().constData());
+		int index = m_ui.cgbSgbModel->findData(model);
+		m_ui.cgbSgbModel->setCurrentIndex(index >= 0 ? index : 0);
 	}
 #endif
 

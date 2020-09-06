@@ -50,6 +50,11 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "V49J", SAVEDATA_SRAM, HW_RUMBLE, IDLE_LOOP_NONE, false },
 	{ "V49E", SAVEDATA_SRAM, HW_RUMBLE, IDLE_LOOP_NONE, false },
 
+	// e-Reader
+	{ "PEAJ", SAVEDATA_FLASH1M, HW_EREADER, IDLE_LOOP_NONE },
+	{ "PSAJ", SAVEDATA_FLASH1M, HW_EREADER, IDLE_LOOP_NONE },
+	{ "PSAE", SAVEDATA_FLASH1M, HW_EREADER, IDLE_LOOP_NONE },
+
 	// Final Fantasy Tactics Advance
 	{ "AFXE", SAVEDATA_FLASH512, HW_NONE, 0x8000428, false },
 
@@ -65,6 +70,13 @@ static const struct GBACartridgeOverride _overrides[] = {
 
 	// Koro Koro Puzzle - Happy Panechu!
 	{ "KHPJ", SAVEDATA_EEPROM, HW_TILT, IDLE_LOOP_NONE, false },
+
+	// Legendz - Yomigaeru Shiren no Shima
+	{ "BLJJ", SAVEDATA_FLASH512, HW_RTC, IDLE_LOOP_NONE, false },
+	{ "BLJK", SAVEDATA_FLASH512, HW_RTC, IDLE_LOOP_NONE, false },
+
+	// Legendz - Sign of Nekuromu
+	{ "BLVJ", SAVEDATA_FLASH512, HW_RTC, IDLE_LOOP_NONE, false },
 
 	// Mega Man Battle Network
 	{ "AREE", SAVEDATA_SRAM, HW_NONE, 0x800032E, false },
@@ -326,6 +338,10 @@ void GBAOverrideApply(struct GBA* gba, const struct GBACartridgeOverride* overri
 
 		if (override->hardware & HW_TILT) {
 			GBAHardwareInitTilt(&gba->memory.hw);
+		}
+
+		if (override->hardware & HW_EREADER) {
+			GBAHardwareInitEReader(&gba->memory.hw);
 		}
 
 		if (override->hardware & HW_GB_PLAYER_DETECTION) {

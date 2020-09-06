@@ -9,6 +9,7 @@ set(SOURCE_FILES
 	cheats/parv3.c
 	core.c
 	dma.c
+	ereader.c
 	gba.c
 	hardware.c
 	hle-bios.c
@@ -39,10 +40,7 @@ set(SIO_FILES
 set(EXTRA_FILES
 	extra/audio-mixer.c
 	extra/battlechip.c
-	extra/proxy.c
-	rr/mgm.c
-	rr/rr.c
-	rr/vbm.c)
+	extra/proxy.c)
 
 set(DEBUGGER_FILES
 	debugger/cli.c)

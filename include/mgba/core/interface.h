@@ -36,6 +36,23 @@ typedef uint32_t color_t;
 #define M_RGB8_TO_BGR5(X) ((((X) & 0xF8) >> 3) | (((X) & 0xF800) >> 6) | (((X) & 0xF80000) >> 9))
 #define M_RGB8_TO_RGB5(X) ((((X) & 0xF8) << 7) | (((X) & 0xF800) >> 6) | (((X) & 0xF80000) >> 19))
 
+#ifndef COLOR_16_BIT
+#define M_COLOR_RED   0x000000FF
+#define M_COLOR_GREEN 0x0000FF00
+#define M_COLOR_BLUE  0x00FF0000
+#define M_COLOR_ALPHA 0xFF000000
+#elif defined(COLOR_5_6_5)
+#define M_COLOR_RED   0x001F
+#define M_COLOR_GREEN 0x07E0
+#define M_COLOR_BLUE  0xF800
+#define M_COLOR_ALPHA 0x0000
+#else
+#define M_COLOR_RED   0x001F
+#define M_COLOR_GREEN 0x03E0
+#define M_COLOR_BLUE  0x7C00
+#define M_COLOR_ALPHA 0x1000
+#endif
+
 #ifndef PYCPARSE
 static inline color_t mColorFrom555(uint16_t value) {
 #ifdef COLOR_16_BIT
@@ -91,6 +108,7 @@ struct mCoreCallbacks {
 	void (*coreCrashed)(void* context);
 	void (*sleep)(void* context);
 	void (*keysRead)(void* context);
+	void (*savedataUpdated)(void* context);
 };
 
 DECLARE_VECTOR(mCoreCallbacksList, struct mCoreCallbacks);
@@ -175,6 +193,7 @@ enum mCoreMemoryBlockFlags {
 	mCORE_MEMORY_READ = 0x01,
 	mCORE_MEMORY_WRITE = 0x02,
 	mCORE_MEMORY_RW = 0x03,
+	mCORE_MEMORY_WORM = 0x04,
 	mCORE_MEMORY_MAPPED = 0x10,
 	mCORE_MEMORY_VIRTUAL = 0x20,
 };

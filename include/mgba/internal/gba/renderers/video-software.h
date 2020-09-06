@@ -53,7 +53,7 @@ enum {
 	GBA_COLOR_WHITE = 0x7FFF,
 #endif
 #else
-	GBA_COLOR_WHITE = 0x00F8F8F8,
+	GBA_COLOR_WHITE = 0x00FFFFFF,
 #endif
 	OFFSET_PRIORITY = 30,
 	OFFSET_INDEX = 28,
@@ -114,6 +114,7 @@ struct GBAVideoSoftwareRenderer {
 	uint16_t bldy;
 
 	GBAMosaicControl mosaic;
+	bool greenswap;
 
 	struct WindowN {
 		struct GBAVideoWindowRegion h;
@@ -139,9 +140,9 @@ struct GBAVideoSoftwareRenderer {
 	int16_t objOffsetY;
 
 	uint32_t scanlineDirty[5];
-	uint16_t nextIo[REG_SOUND1CNT_LO];
+	uint16_t nextIo[REG_SOUND1CNT_LO >> 1];
 	struct ScanlineCache {
-		uint16_t io[REG_SOUND1CNT_LO];
+		uint16_t io[REG_SOUND1CNT_LO >> 1];
 		int32_t scale[2][2];
 	} cache[GBA_VIDEO_VERTICAL_PIXELS];
 	int nextY;

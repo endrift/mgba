@@ -142,7 +142,7 @@ void FrameView::disableLayer(const QPointF& coord) {
 }
 
 #ifdef M_CORE_GBA
-void FrameView::updateTilesGBA(bool force) {
+void FrameView::updateTilesGBA(bool) {
 	if (m_ui.freeze->checkState() == Qt::Checked) {
 		return;
 	}
@@ -285,7 +285,7 @@ void FrameView::injectGBA() {
 #endif
 
 #ifdef M_CORE_GB
-void FrameView::updateTilesGB(bool force) {
+void FrameView::updateTilesGB(bool) {
 	if (m_ui.freeze->checkState() == Qt::Checked) {
 		return;
 	}
@@ -314,10 +314,12 @@ void FrameView::invalidateQueue(const QSize& dims) {
 #ifdef M_CORE_GBA
 		case PLATFORM_GBA:
 			injectGBA();
+			break;
 #endif
 #ifdef M_CORE_GB
 		case PLATFORM_GB:
 			injectGB();
+			break;
 #endif
 		}
 		m_vl->runFrame(m_vl);
@@ -376,6 +378,8 @@ bool FrameView::eventFilter(QObject* obj, QEvent* event) {
 		pos /= m_ui.magnification->value();
 		disableLayer(pos);
 		return true;
+	default:
+		break;
 	}
 	return false;
 }
@@ -386,12 +390,6 @@ void FrameView::refreshVl() {
 	m_nextFrame = VFileMemChunk(nullptr, 0);
 	if (m_currentFrame) {
 		m_controller->endVideoLog(false);
-		VFile* currentFrame = VFileMemChunk(nullptr, m_currentFrame->size(m_currentFrame));
-		void* buffer = currentFrame->map(currentFrame, m_currentFrame->size(m_currentFrame), MAP_WRITE);
-		m_currentFrame->seek(m_currentFrame, 0, SEEK_SET);
-		m_currentFrame->read(m_currentFrame, buffer, m_currentFrame->size(m_currentFrame));
-		currentFrame->unmap(currentFrame, buffer, m_currentFrame->size(m_currentFrame));
-		m_currentFrame = currentFrame;
 		QMetaObject::invokeMethod(this, "newVl");
 	}
 	m_controller->endVideoLog();
@@ -403,12 +401,16 @@ void FrameView::newVl() {
 		m_glowTimer.start();
 	}
 	QMutexLocker locker(&m_mutex);
+	if (!m_currentFrame) {
+		return;
+	}
 	if (m_vl) {
 		m_vl->deinit(m_vl);
 	}
 	m_vl = mCoreFindVF(m_currentFrame);
 	m_vl->init(m_vl);
 	m_vl->loadROM(m_vl, m_currentFrame);
+	m_currentFrame = nullptr;
 	mCoreInitConfig(m_vl, nullptr);
 	unsigned width, height;
 	m_vl->desiredVideoDimensions(m_vl, &width, &height);
