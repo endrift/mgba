@@ -30,6 +30,7 @@
 
 #define SAMPLES 1024
 #define RUMBLE_PWM 35
+#define EVENT_RATE 60
 
 static retro_environment_t environCallback;
 static retro_video_refresh_t videoCallback;
@@ -38,6 +39,8 @@ static retro_input_poll_t inputPollCallback;
 static retro_input_state_t inputCallback;
 static retro_log_printf_t logCallback;
 static retro_set_rumble_state_t rumbleCallback;
+static retro_sensor_get_input_t sensorGetCallback;
+static retro_set_sensor_state_t sensorStateCallback;
 
 static void GBARetroLog(struct mLogger* logger, int category, enum mLogLevel level, const char* format, va_list args);
 
@@ -49,6 +52,10 @@ static void _updateCamera(const uint32_t* buffer, unsigned width, unsigned heigh
 static void _startImage(struct mImageSource*, unsigned w, unsigned h, int colorFormats);
 static void _stopImage(struct mImageSource*);
 static void _requestImage(struct mImageSource*, const void** buffer, size_t* stride, enum mColorFormat* colorFormat);
+static void _updateRotation(struct mRotationSource* source);
+static int32_t _readTiltX(struct mRotationSource* source);
+static int32_t _readTiltY(struct mRotationSource* source);
+static int32_t _readGyroZ(struct mRotationSource* source);
 
 static struct mCore* core;
 static color_t* outputBuffer = NULL;
@@ -56,11 +63,18 @@ static void* data;
 static size_t dataSize;
 static void* savedata;
 static struct mAVStream stream;
+static bool sensorsInitDone;
 static int rumbleUp;
 static int rumbleDown;
 static struct mRumble rumble;
 static struct GBALuminanceSource lux;
-static int luxLevel;
+static struct mRotationSource rotation;
+static bool tiltEnabled;
+static bool gyroEnabled;
+static int luxLevelIndex;
+static uint8_t luxLevel;
+static bool luxSensorEnabled;
+static bool luxSensorUsed;
 static struct mLogger logger;
 static struct retro_camera_callback cam;
 static struct mImageSource imageSource;
@@ -70,6 +84,39 @@ static unsigned camHeight;
 static unsigned imcapWidth;
 static unsigned imcapHeight;
 static size_t camStride;
+static bool deferredSetup = false;
+static bool envVarsUpdated;
+static int32_t tiltX = 0;
+static int32_t tiltY = 0;
+static int32_t gyroZ = 0;
+
+static void _initSensors(void) {
+	if (sensorsInitDone) {
+		return;
+	}
+
+	struct retro_sensor_interface sensorInterface;
+	if (environCallback(RETRO_ENVIRONMENT_GET_SENSOR_INTERFACE, &sensorInterface)) {
+		sensorGetCallback = sensorInterface.get_sensor_input;
+		sensorStateCallback = sensorInterface.set_sensor_state;
+
+		if (sensorStateCallback && sensorGetCallback) {
+			if (sensorStateCallback(0, RETRO_SENSOR_ACCELEROMETER_ENABLE, EVENT_RATE)) {
+				tiltEnabled = true;
+			}
+
+			if (sensorStateCallback(0, RETRO_SENSOR_GYROSCOPE_ENABLE, EVENT_RATE)) {
+				gyroEnabled = true;
+			}
+
+			if (sensorStateCallback(0, RETRO_SENSOR_ILLUMINANCE_ENABLE, EVENT_RATE)) {
+				luxSensorEnabled = true;
+			}
+		}
+	}
+
+	sensorsInitDone = true;
+}
 
 static void _reloadSettings(void) {
 	struct mCoreOptions opts = {
@@ -142,8 +189,28 @@ static void _reloadSettings(void) {
 		}
 	}
 
+#ifdef M_CORE_GBA
+	var.key = "mgba_force_gbp";
+	var.value = 0;
+	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value) {
+		mCoreConfigSetDefaultIntValue(&core->config, "gba.forceGbp", strcmp(var.value, "ON") == 0);
+	}
+#endif
+
 	mCoreConfigLoadDefaults(&core->config, &opts);
 	mCoreLoadConfig(core);
+}
+
+static void _doDeferredSetup(void) {
+	// Libretro API doesn't let you know when it's done copying data into the save buffers.
+	// On the off-hand chance that a core actually expects its buffers to be populated when
+	// you actually first get them, you're out of luck without workarounds. Yup, seriously.
+	// Here's that workaround, but really the API needs to be thrown out and rewritten.
+	struct VFile* save = VFileFromMemory(savedata, SIZE_CART_FLASH1M);
+	if (!core->loadSave(core, save)) {
+		save->close(save);
+	}
+	deferredSetup = false;
 }
 
 unsigned retro_api_version(void) {
@@ -194,7 +261,7 @@ void retro_get_system_av_info(struct retro_system_av_info* info) {
 	info->geometry.base_width = width;
 	info->geometry.base_height = height;
 #ifdef M_CORE_GB
-	if (core->platform(core) == PLATFORM_GB) {
+	if (core->platform(core) == mPLATFORM_GB) {
 		info->geometry.max_width = 256;
 		info->geometry.max_height = 224;
 	} else
@@ -251,6 +318,21 @@ void retro_init(void) {
 		rumbleCallback = 0;
 	}
 
+	sensorsInitDone = false;
+	sensorGetCallback = 0;
+	sensorStateCallback = 0;
+
+	tiltEnabled = false;
+	gyroEnabled = false;
+	rotation.sample = _updateRotation;
+	rotation.readTiltX = _readTiltX;
+	rotation.readTiltY = _readTiltY;
+	rotation.readGyroZ = _readGyroZ;
+
+	envVarsUpdated = true;
+	luxSensorUsed = false;
+	luxSensorEnabled = false;
+	luxLevelIndex = 0;
 	luxLevel = 0;
 	lux.readLuminance = _readLux;
 	lux.sample = _updateLux;
@@ -277,14 +359,33 @@ void retro_init(void) {
 
 void retro_deinit(void) {
 	free(outputBuffer);
+
+	if (sensorStateCallback) {
+		sensorStateCallback(0, RETRO_SENSOR_ACCELEROMETER_DISABLE, EVENT_RATE);
+		sensorStateCallback(0, RETRO_SENSOR_GYROSCOPE_DISABLE, EVENT_RATE);
+		sensorStateCallback(0, RETRO_SENSOR_ILLUMINANCE_DISABLE, EVENT_RATE);
+		sensorGetCallback = NULL;
+		sensorStateCallback = NULL;
+	}
+
+	tiltEnabled = false;
+	gyroEnabled = false;
+	luxSensorEnabled = false;
+	sensorsInitDone = false;
 }
 
 void retro_run(void) {
+	if (deferredSetup) {
+		_doDeferredSetup();
+	}
 	uint16_t keys;
+
 	inputPollCallback();
 
 	bool updated = false;
 	if (environCallback(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated) {
+		envVarsUpdated = true;
+
 		struct retro_variable var = {
 			.key = "mgba_allow_opposing_directions",
 			.value = 0
@@ -315,23 +416,25 @@ void retro_run(void) {
 	keys |= (!!inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L)) << 9;
 	core->setKeys(core, keys);
 
-	static bool wasAdjustingLux = false;
-	if (wasAdjustingLux) {
-		wasAdjustingLux = inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3) ||
-		                  inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3);
-	} else {
-		if (inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3)) {
-			++luxLevel;
-			if (luxLevel > 10) {
-				luxLevel = 10;
+	if (!luxSensorUsed) {
+		static bool wasAdjustingLux = false;
+		if (wasAdjustingLux) {
+			wasAdjustingLux = inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3) ||
+			                  inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3);
+		} else {
+			if (inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3)) {
+				++luxLevelIndex;
+				if (luxLevelIndex > 10) {
+					luxLevelIndex = 10;
+				}
+				wasAdjustingLux = true;
+			} else if (inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3)) {
+				--luxLevelIndex;
+				if (luxLevelIndex < 0) {
+					luxLevelIndex = 0;
+				}
+				wasAdjustingLux = true;
 			}
-			wasAdjustingLux = true;
-		} else if (inputCallback(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3)) {
-			--luxLevel;
-			if (luxLevel < 0) {
-				luxLevel = 0;
-			}
-			wasAdjustingLux = true;
 		}
 	}
 
@@ -355,7 +458,7 @@ void retro_run(void) {
 
 static void _setupMaps(struct mCore* core) {
 #ifdef M_CORE_GBA
-	if (core->platform(core) == PLATFORM_GBA) {
+	if (core->platform(core) == mPLATFORM_GBA) {
 		struct GBA* gba = core->board;
 		struct retro_memory_descriptor descs[11];
 		struct retro_memory_map mmaps;
@@ -436,7 +539,7 @@ static void _setupMaps(struct mCore* core) {
 	}
 #endif
 #ifdef M_CORE_GB
-	if (core->platform(core) == PLATFORM_GB) {
+	if (core->platform(core) == mPLATFORM_GB) {
 		struct GB* gb = core->board;
 		struct retro_memory_descriptor descs[11];
 		struct retro_memory_map mmaps;
@@ -580,11 +683,10 @@ bool retro_load_game(const struct retro_game_info* game) {
 
 	savedata = anonymousMemoryMap(SIZE_CART_FLASH1M);
 	memset(savedata, 0xFF, SIZE_CART_FLASH1M);
-	struct VFile* save = VFileFromMemory(savedata, SIZE_CART_FLASH1M);
 
 	_reloadSettings();
 	core->loadROM(core, rom);
-	core->loadSave(core, save);
+	deferredSetup = true;
 
 	const char* sysDir = 0;
 	const char* biosName = 0;
@@ -592,7 +694,7 @@ bool retro_load_game(const struct retro_game_info* game) {
 	environCallback(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &sysDir);
 
 #ifdef M_CORE_GBA
-	if (core->platform(core) == PLATFORM_GBA) {
+	if (core->platform(core) == mPLATFORM_GBA) {
 		core->setPeripheral(core, mPERIPH_GBA_LUMINANCE, &lux);
 		biosName = "gba_bios.bin";
 
@@ -600,15 +702,16 @@ bool retro_load_game(const struct retro_game_info* game) {
 #endif
 
 #ifdef M_CORE_GB
-	if (core->platform(core) == PLATFORM_GB) {
+	if (core->platform(core) == mPLATFORM_GB) {
 		memset(&cam, 0, sizeof(cam));
 		cam.height = GBCAM_HEIGHT;
 		cam.width = GBCAM_WIDTH;
 		cam.caps = 1 << RETRO_CAMERA_BUFFER_RAW_FRAMEBUFFER;
 		cam.frame_raw_framebuffer = _updateCamera;
-		core->setPeripheral(core, mPERIPH_IMAGE_SOURCE, &imageSource);
+		if (environCallback(RETRO_ENVIRONMENT_GET_CAMERA_INTERFACE, &cam)) {
+			core->setPeripheral(core, mPERIPH_IMAGE_SOURCE, &imageSource);
+		}
 
-		environCallback(RETRO_ENVIRONMENT_GET_CAMERA_INTERFACE, &cam);
 		const char* modelName = mCoreConfigGetValue(&core->config, "gb.model");
 		struct GB* gb = core->board;
 
@@ -661,6 +764,9 @@ void retro_unload_game(void) {
 }
 
 size_t retro_serialize_size(void) {
+	if (deferredSetup) {
+		_doDeferredSetup();
+	}
 	struct VFile* vfm = VFileMemChunk(NULL, 0);
 	mCoreSaveStateNamed(core, vfm, SAVESTATE_SAVEDATA | SAVESTATE_RTC);
 	size_t size = vfm->size(vfm);
@@ -669,6 +775,9 @@ size_t retro_serialize_size(void) {
 }
 
 bool retro_serialize(void* data, size_t size) {
+	if (deferredSetup) {
+		_doDeferredSetup();
+	}
 	struct VFile* vfm = VFileMemChunk(NULL, 0);
 	mCoreSaveStateNamed(core, vfm, SAVESTATE_SAVEDATA | SAVESTATE_RTC);
 	if ((ssize_t) size > vfm->size(vfm)) {
@@ -684,6 +793,9 @@ bool retro_serialize(void* data, size_t size) {
 }
 
 bool retro_unserialize(const void* data, size_t size) {
+	if (deferredSetup) {
+		_doDeferredSetup();
+	}
 	struct VFile* vfm = VFileFromConstMemory(data, size);
 	bool success = mCoreLoadStateNamed(core, vfm, SAVESTATE_RTC);
 	vfm->close(vfm);
@@ -707,7 +819,7 @@ void retro_cheat_set(unsigned index, bool enabled, const char* code) {
 	}
 // Convert the super wonky unportable libretro format to something normal
 #ifdef M_CORE_GBA
-	if (core->platform(core) == PLATFORM_GBA) {
+	if (core->platform(core) == mPLATFORM_GBA) {
 		char realCode[] = "XXXXXXXX XXXXXXXX";
 		size_t len = strlen(code) + 1; // Include null terminator
 		size_t i, pos;
@@ -728,7 +840,7 @@ void retro_cheat_set(unsigned index, bool enabled, const char* code) {
 	}
 #endif
 #ifdef M_CORE_GB
-	if (core->platform(core) == PLATFORM_GB) {
+	if (core->platform(core) == mPLATFORM_GB) {
 		char realCode[] = "XXX-XXX-XXX";
 		size_t len = strlen(code) + 1; // Include null terminator
 		size_t i, pos;
@@ -768,31 +880,68 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info* i
 }
 
 void* retro_get_memory_data(unsigned id) {
-	if (id != RETRO_MEMORY_SAVE_RAM) {
-		return 0;
+	switch (id) {
+	case RETRO_MEMORY_SAVE_RAM:
+		return savedata;
+	case RETRO_MEMORY_RTC:
+		switch (core->platform(core)) {
+#ifdef M_CORE_GB
+		case mPLATFORM_GB:
+			switch (((struct GB*) core->board)->memory.mbcType) {
+			case GB_MBC3_RTC:
+				return &((uint8_t*) savedata)[((struct GB*) core->board)->sramSize];
+			default:
+				return NULL;
+			}
+#endif
+		default:
+			return NULL;
+		}
+	default:
+		break;
 	}
-	return savedata;
+	return NULL;
 }
 
 size_t retro_get_memory_size(unsigned id) {
-	if (id != RETRO_MEMORY_SAVE_RAM) {
-		return 0;
-	}
+	switch (id) {
+	case RETRO_MEMORY_SAVE_RAM:
+		switch (core->platform(core)) {
 #ifdef M_CORE_GBA
-	if (core->platform(core) == PLATFORM_GBA) {
-		switch (((struct GBA*) core->board)->memory.savedata.type) {
-		case SAVEDATA_AUTODETECT:
-			return SIZE_CART_FLASH1M;
-		default:
-			return GBASavedataSize(&((struct GBA*) core->board)->memory.savedata);
-		}
-	}
+		case mPLATFORM_GBA:
+			switch (((struct GBA*) core->board)->memory.savedata.type) {
+			case SAVEDATA_AUTODETECT:
+				return SIZE_CART_FLASH1M;
+			default:
+				return GBASavedataSize(&((struct GBA*) core->board)->memory.savedata);
+			}
 #endif
 #ifdef M_CORE_GB
-	if (core->platform(core) == PLATFORM_GB) {
-		return ((struct GB*) core->board)->sramSize;
-	}
+		case mPLATFORM_GB:
+			return ((struct GB*) core->board)->sramSize;
 #endif
+		default:
+			break;
+		}
+		break;
+	case RETRO_MEMORY_RTC:
+		switch (core->platform(core)) {
+#ifdef M_CORE_GB
+		case mPLATFORM_GB:
+			switch (((struct GB*) core->board)->memory.mbcType) {
+			case GB_MBC3_RTC:
+				return sizeof(struct GBMBCRTCSaveBuffer);
+			default:
+				return 0;
+			}
+#endif
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
 	return 0;
 }
 
@@ -868,35 +1017,48 @@ static void _updateLux(struct GBALuminanceSource* lux) {
 		.key = "mgba_solar_sensor_level",
 		.value = 0
 	};
+	bool luxVarUpdated = envVarsUpdated;
 
-	bool updated = false;
-	if (!environCallback(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) || !updated) {
-		return;
-	}
-	if (!environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || !var.value) {
-		return;
+	if (luxVarUpdated && (!environCallback(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || !var.value)) {
+		luxVarUpdated = false;
 	}
 
-	char* end;
-	int newLuxLevel = strtol(var.value, &end, 10);
-	if (!*end) {
-		if (newLuxLevel > 10) {
-			luxLevel = 10;
-		} else if (newLuxLevel < 0) {
-			luxLevel = 0;
-		} else {
-			luxLevel = newLuxLevel;
+	if (luxVarUpdated) {
+		luxSensorUsed = strcmp(var.value, "sensor") == 0;
+	}
+
+	if (luxSensorUsed) {
+		_initSensors();
+		float fLux = luxSensorEnabled ? sensorGetCallback(0, RETRO_SENSOR_ILLUMINANCE) : 0.0f;
+		luxLevel = cbrtf(fLux) * 8;
+	} else {
+		if (luxVarUpdated) {
+			char* end;
+			int newLuxLevelIndex = strtol(var.value, &end, 10);
+
+			if (!*end) {
+				if (newLuxLevelIndex > 10) {
+					luxLevelIndex = 10;
+				} else if (newLuxLevelIndex < 0) {
+					luxLevelIndex = 0;
+				} else {
+					luxLevelIndex = newLuxLevelIndex;
+				}
+			}
+		}
+
+		luxLevel = 0x16;
+		if (luxLevelIndex > 0) {
+			luxLevel += GBA_LUX_LEVELS[luxLevelIndex - 1];
 		}
 	}
+
+	envVarsUpdated = false;
 }
 
 static uint8_t _readLux(struct GBALuminanceSource* lux) {
 	UNUSED(lux);
-	int value = 0x16;
-	if (luxLevel > 0) {
-		value += GBA_LUX_LEVELS[luxLevel - 1];
-	}
-	return 0xFF - value;
+	return 0xFF - luxLevel;
 }
 
 static void _updateCamera(const uint32_t* buffer, unsigned width, unsigned height, size_t pitch) {
@@ -961,4 +1123,34 @@ static void _requestImage(struct mImageSource* image, const void** buffer, size_
 	*buffer = &camData[offset];
 	*stride = camStride;
 	*colorFormat = mCOLOR_XRGB8;
+}
+
+static void _updateRotation(struct mRotationSource* source) {
+	UNUSED(source);
+	tiltX = 0;
+	tiltY = 0;
+	gyroZ = 0;
+	_initSensors();
+	if (tiltEnabled) {
+		tiltX = sensorGetCallback(0, RETRO_SENSOR_ACCELEROMETER_X) * 3e8f;
+		tiltY = sensorGetCallback(0, RETRO_SENSOR_ACCELEROMETER_Y) * -3e8f;
+	}
+	if (gyroEnabled) {
+		gyroZ = sensorGetCallback(0, RETRO_SENSOR_GYROSCOPE_Z) * -1.1e9f;
+	}
+}
+
+static int32_t _readTiltX(struct mRotationSource* source) {
+	UNUSED(source);
+	return tiltX;
+}
+
+static int32_t _readTiltY(struct mRotationSource* source) {
+	UNUSED(source);
+	return tiltY;
+}
+
+static int32_t _readGyroZ(struct mRotationSource* source) {
+	UNUSED(source);
+	return gyroZ;
 }

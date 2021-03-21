@@ -100,8 +100,10 @@ set(SOURCE_FILES
 	PaletteView.cpp
 	PlacementControl.cpp
 	RegisterView.cpp
+	ReportView.cpp
 	ROMInfo.cpp
 	RotatedHeaderView.cpp
+	SaveConverter.cpp
 	SavestateButton.cpp
 	SensorView.cpp
 	SettingsView.cpp
@@ -139,7 +141,9 @@ set(UI_FILES
 	PaletteView.ui
 	PlacementControl.ui
 	PrinterView.ui
+	ReportView.ui
 	ROMInfo.ui
+	SaveConverter.ui
 	SensorView.ui
 	SettingsView.ui
 	ShaderSelector.ui
@@ -257,7 +261,9 @@ if(Qt5LinguistTools_FOUND)
 	file(GLOB TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ts/${BINARY_NAME}-*.ts")
 	if(UPDATE_TRANSLATIONS)
 		qt5_create_translation(TRANSLATION_FILES ${SOURCE_FILES} ${UI_FILES} ${TS_FILES} OPTIONS -locations absolute -no-obsolete)
+		list(REMOVE_ITEM TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ts/${BINARY_NAME}-template.ts")
 	else()
+		list(REMOVE_ITEM TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ts/${BINARY_NAME}-template.ts")
 		qt5_add_translation(TRANSLATION_FILES ${TS_FILES})
 	endif()
 	set(QT_QM_FILES)
@@ -322,10 +328,7 @@ install(TARGETS ${BINARY_NAME}-qt
 	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT ${BINARY_NAME}-qt
 	BUNDLE DESTINATION Applications COMPONENT ${BINARY_NAME}-qt)
 if(UNIX AND NOT APPLE)
-	find_program(DESKTOP_FILE_INSTALL desktop-file-install)
-	if(DESKTOP_FILE_INSTALL)
-		install(CODE "execute_process(COMMAND ${DESKTOP_FILE_INSTALL} \"${CMAKE_SOURCE_DIR}/res/mgba-qt.desktop\" --dir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/applications/\")" COMPONENT ${BINARY_NAME}-qt)
-	endif()
+	install(FILES ${CMAKE_SOURCE_DIR}/res/mgba-qt.desktop DESTINATION share/applications COMPONENT ${BINARY_NAME}-qt)
 endif()
 if(UNIX)
 	install(FILES ${CMAKE_SOURCE_DIR}/doc/mgba-qt.6 DESTINATION ${MANDIR}/man6 COMPONENT ${BINARY_NAME}-qt)

@@ -25,6 +25,7 @@
 #include <mgba/internal/gb/gb.h>
 #include <mgba/internal/gb/renderers/cache-set.h>
 #endif
+#include "feature/sqlite3/no-intro.h"
 #include <mgba-util/math.h>
 #include <mgba-util/vfs.h>
 
@@ -34,11 +35,12 @@ using namespace QGBA;
 
 CoreController::CoreController(mCore* core, QObject* parent)
 	: QObject(parent)
-	, m_saveStateFlags(SAVESTATE_SCREENSHOT | SAVESTATE_SAVEDATA | SAVESTATE_CHEATS | SAVESTATE_RTC)
 	, m_loadStateFlags(SAVESTATE_SCREENSHOT | SAVESTATE_RTC)
+	, m_saveStateFlags(SAVESTATE_SCREENSHOT | SAVESTATE_SAVEDATA | SAVESTATE_CHEATS | SAVESTATE_RTC)
 {
 	m_threadContext.core = core;
 	m_threadContext.userData = this;
+	updateROMInfo();
 
 	m_resetActions.append([this]() {
 		if (m_autoload) {
@@ -51,7 +53,7 @@ CoreController::CoreController(mCore* core, QObject* parent)
 
 		switch (context->core->platform(context->core)) {
 #ifdef M_CORE_GBA
-		case PLATFORM_GBA:
+		case mPLATFORM_GBA:
 			context->core->setPeripheral(context->core, mPERIPH_GBA_LUMINANCE, controller->m_inputController->luminance());
 			break;
 #endif
@@ -81,7 +83,9 @@ CoreController::CoreController(mCore* core, QObject* parent)
 
 		controller->m_resetActions.clear();
 
-		context->core->setVideoBuffer(context->core, reinterpret_cast<color_t*>(controller->m_activeBuffer.data()), controller->screenDimensions().width());
+		if (!controller->m_hwaccel) {
+			context->core->setVideoBuffer(context->core, reinterpret_cast<color_t*>(controller->m_activeBuffer.data()), controller->screenDimensions().width());
+		}
 
 		QMetaObject::invokeMethod(controller, "didReset");
 		controller->finishFrame();
@@ -263,10 +267,28 @@ void CoreController::loadConfig(ConfigController* config) {
 	m_fastForwardMute = config->getOption("fastForwardMute", -1).toInt();
 	mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "volume");
 	mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "mute");
+
+	QSize sizeBefore = screenDimensions();
+	m_activeBuffer.resize(256 * 224 * sizeof(color_t));
+	m_threadContext.core->setVideoBuffer(m_threadContext.core, reinterpret_cast<color_t*>(m_activeBuffer.data()), sizeBefore.width());
+
 	mCoreLoadForeignConfig(m_threadContext.core, config->config());
+
+	QSize sizeAfter = screenDimensions();
+	m_activeBuffer.resize(sizeAfter.width() * sizeAfter.height() * sizeof(color_t));
+	m_threadContext.core->setVideoBuffer(m_threadContext.core, reinterpret_cast<color_t*>(m_activeBuffer.data()), sizeAfter.width());
+
 	if (hasStarted()) {
 		updateFastForward();
 		mCoreThreadRewindParamsChanged(&m_threadContext);
+	}
+	if (sizeBefore != sizeAfter) {
+#ifdef M_CORE_GB
+		mCoreConfigSetIntValue(&m_threadContext.core->config, "sgb.borders", 0);
+		m_threadContext.core->reloadConfigOption(m_threadContext.core, "sgb.borders", nullptr);
+		mCoreConfigCopyValue(&m_threadContext.core->config, config->config(), "sgb.borders");
+		m_threadContext.core->reloadConfigOption(m_threadContext.core, "sgb.borders", nullptr);
+#endif
 	}
 }
 
@@ -312,7 +334,7 @@ mCacheSet* CoreController::graphicCaches() {
 	Interrupter interrupter(this);
 	switch (platform()) {
 #ifdef M_CORE_GBA
-	case PLATFORM_GBA: {
+	case mPLATFORM_GBA: {
 		GBA* gba = static_cast<GBA*>(m_threadContext.core->board);
 		m_cacheSet = std::make_unique<mCacheSet>();
 		GBAVideoCacheInit(m_cacheSet.get());
@@ -321,7 +343,7 @@ mCacheSet* CoreController::graphicCaches() {
 	}
 #endif
 #ifdef M_CORE_GB
-	case PLATFORM_GB: {
+	case mPLATFORM_GB: {
 		GB* gb = static_cast<GB*>(m_threadContext.core->board);
 		m_cacheSet = std::make_unique<mCacheSet>();
 		GBVideoCacheInit(m_cacheSet.get());
@@ -356,7 +378,7 @@ void CoreController::setLogger(LogController* logger) {
 }
 
 void CoreController::start() {
-	QSize size(256, 224);
+	QSize size(screenDimensions());
 	m_activeBuffer.resize(size.width() * size.height() * sizeof(color_t));
 	m_activeBuffer.fill(0xFF);
 	m_completeBuffer = m_activeBuffer;
@@ -382,33 +404,29 @@ void CoreController::stop() {
 }
 
 void CoreController::reset() {
-	bool wasPaused = isPaused();
-	setPaused(false);
-	Interrupter interrupter(this);
 	mCoreThreadReset(&m_threadContext);
-	if (wasPaused) {
-		setPaused(true);
-	}
 }
 
 void CoreController::setPaused(bool paused) {
-	if (paused == isPaused()) {
-		return;
-	}
+	QMutexLocker locker(&m_actionMutex);
 	if (paused) {
-		addFrameAction([this]() {
-			mCoreThreadPauseFromThread(&m_threadContext);
-		});
+		if (m_moreFrames < 0) {
+			m_moreFrames = 1;
+		}
 	} else {
-		mCoreThreadUnpause(&m_threadContext);
+		m_moreFrames = -1;
+		if (isPaused()) {
+			mCoreThreadUnpause(&m_threadContext);
+		}
 	}
 }
 
 void CoreController::frameAdvance() {
-	addFrameAction([this]() {
-		mCoreThreadPauseFromThread(&m_threadContext);
-	});
-	setPaused(false);
+	QMutexLocker locker(&m_actionMutex);
+	m_moreFrames = 1;
+	if (isPaused()) {
+		mCoreThreadUnpause(&m_threadContext);
+	}
 }
 
 void CoreController::addFrameAction(std::function<void ()> action) {
@@ -483,7 +501,7 @@ void CoreController::loadState(int slot) {
 	mCoreThreadRunFunction(&m_threadContext, [](mCoreThread* context) {
 		CoreController* controller = static_cast<CoreController*>(context->userData);
 		if (!controller->m_backupLoadState.isOpen()) {
-			controller->m_backupLoadState = VFileMemChunk(nullptr, 0);
+			controller->m_backupLoadState = VFileDevice::openMemory();
 		}
 		mCoreSaveStateNamed(context->core, controller->m_backupLoadState, controller->m_saveStateFlags);
 		if (mCoreLoadState(context->core, controller->m_stateSlot, controller->m_loadStateFlags)) {
@@ -493,8 +511,12 @@ void CoreController::loadState(int slot) {
 	});
 }
 
-void CoreController::loadState(const QString& path) {
+void CoreController::loadState(const QString& path, int flags) {
 	m_statePath = path;
+	int savedFlags = m_loadStateFlags;
+	if (flags != -1) {
+		m_loadStateFlags = flags;
+	}
 	mCoreThreadRunFunction(&m_threadContext, [](mCoreThread* context) {
 		CoreController* controller = static_cast<CoreController*>(context->userData);
 		VFile* vf = VFileDevice::open(controller->m_statePath, O_RDONLY);
@@ -502,7 +524,7 @@ void CoreController::loadState(const QString& path) {
 			return;
 		}
 		if (!controller->m_backupLoadState.isOpen()) {
-			controller->m_backupLoadState = VFileMemChunk(nullptr, 0);
+			controller->m_backupLoadState = VFileDevice::openMemory();
 		}
 		mCoreSaveStateNamed(context->core, controller->m_backupLoadState, controller->m_saveStateFlags);
 		if (mCoreLoadStateNamed(context->core, vf, controller->m_loadStateFlags)) {
@@ -511,6 +533,35 @@ void CoreController::loadState(const QString& path) {
 		}
 		vf->close(vf);
 	});
+	m_loadStateFlags = savedFlags;
+}
+
+void CoreController::loadState(QIODevice* iodev, int flags) {
+	m_stateVf = VFileDevice::wrap(iodev, QIODevice::ReadOnly);
+	if (!m_stateVf) {
+		return;
+	}
+	int savedFlags = m_loadStateFlags;
+	if (flags != -1) {
+		m_loadStateFlags = flags;
+	}
+	mCoreThreadRunFunction(&m_threadContext, [](mCoreThread* context) {
+		CoreController* controller = static_cast<CoreController*>(context->userData);
+		VFile* vf = controller->m_stateVf;
+		if (!vf) {
+			return;
+		}
+		if (!controller->m_backupLoadState.isOpen()) {
+			controller->m_backupLoadState = VFileDevice::openMemory();
+		}
+		mCoreSaveStateNamed(context->core, controller->m_backupLoadState, controller->m_saveStateFlags);
+		if (mCoreLoadStateNamed(context->core, vf, controller->m_loadStateFlags)) {
+			emit controller->frameAvailable();
+			emit controller->stateLoaded();
+		}
+		vf->close(vf);
+	});
+	m_loadStateFlags = savedFlags;
 }
 
 void CoreController::saveState(int slot) {
@@ -529,8 +580,12 @@ void CoreController::saveState(int slot) {
 	});
 }
 
-void CoreController::saveState(const QString& path) {
+void CoreController::saveState(const QString& path, int flags) {
 	m_statePath = path;
+	int savedFlags = m_saveStateFlags;
+	if (flags != -1) {
+		m_saveStateFlags = flags;
+	}
 	mCoreThreadRunFunction(&m_threadContext, [](mCoreThread* context) {
 		CoreController* controller = static_cast<CoreController*>(context->userData);
 		VFile* vf = VFileDevice::open(controller->m_statePath, O_RDONLY);
@@ -546,6 +601,28 @@ void CoreController::saveState(const QString& path) {
 		mCoreSaveStateNamed(context->core, vf, controller->m_saveStateFlags);
 		vf->close(vf);
 	});
+	m_saveStateFlags = savedFlags;
+}
+
+void CoreController::saveState(QIODevice* iodev, int flags) {
+	m_stateVf = VFileDevice::wrap(iodev, QIODevice::WriteOnly | QIODevice::Truncate);
+	if (!m_stateVf) {
+		return;
+	}
+	int savedFlags = m_saveStateFlags;
+	if (flags != -1) {
+		m_saveStateFlags = flags;
+	}
+	mCoreThreadRunFunction(&m_threadContext, [](mCoreThread* context) {
+		CoreController* controller = static_cast<CoreController*>(context->userData);
+		VFile* vf = controller->m_stateVf;
+		if (!vf) {
+			return;
+		}
+		mCoreSaveStateNamed(context->core, vf, controller->m_saveStateFlags);
+		vf->close(vf);
+	});
+	m_saveStateFlags = savedFlags;
 }
 
 void CoreController::loadBackupState() {
@@ -606,6 +683,7 @@ void CoreController::loadPatch(const QString& patchPath) {
 		m_threadContext.core->loadPatch(m_threadContext.core, patch);
 		m_patched = true;
 		patch->close(patch);
+		updateROMInfo();
 	}
 	if (mCoreThreadHasStarted(&m_threadContext)) {
 		reset();
@@ -622,6 +700,7 @@ void CoreController::replaceGame(const QString& path) {
 	Interrupter interrupter(this);
 	mDirectorySetDetachBase(&m_threadContext.core->dirs);
 	mCoreLoadFile(m_threadContext.core, fname.toUtf8().constData());
+	updateROMInfo();
 }
 
 void CoreController::yankPak() {
@@ -629,15 +708,18 @@ void CoreController::yankPak() {
 
 	switch (platform()) {
 #ifdef M_CORE_GBA
-	case PLATFORM_GBA:
+	case mPLATFORM_GBA:
 		GBAYankROM(static_cast<GBA*>(m_threadContext.core->board));
 		break;
 #endif
 #ifdef M_CORE_GB
-	case PLATFORM_GB:
+	case mPLATFORM_GB:
 		GBYankROM(static_cast<GB*>(m_threadContext.core->board));
 		break;
 #endif
+	case mPLATFORM_NONE:
+		LOG(QT, ERROR) << tr("Can't yank pack in unexpected platform!");
+		break;
 	}
 }
 
@@ -708,7 +790,7 @@ void CoreController::scanCard(const QString& path) {
 
 void CoreController::importSharkport(const QString& path) {
 #ifdef M_CORE_GBA
-	if (platform() != PLATFORM_GBA) {
+	if (platform() != mPLATFORM_GBA) {
 		return;
 	}
 	VFile* vf = VFileDevice::open(path, O_RDONLY);
@@ -724,7 +806,7 @@ void CoreController::importSharkport(const QString& path) {
 
 void CoreController::exportSharkport(const QString& path) {
 #ifdef M_CORE_GBA
-	if (platform() != PLATFORM_GBA) {
+	if (platform() != mPLATFORM_GBA) {
 		return;
 	}
 	VFile* vf = VFileDevice::open(path, O_WRONLY | O_CREAT | O_TRUNC);
@@ -740,7 +822,7 @@ void CoreController::exportSharkport(const QString& path) {
 
 #ifdef M_CORE_GB
 void CoreController::attachPrinter() {
-	if (platform() != PLATFORM_GB) {
+	if (platform() != mPLATFORM_GB) {
 		return;
 	}
 	GB* gb = static_cast<GB*>(m_threadContext.core->board);
@@ -772,7 +854,7 @@ void CoreController::attachPrinter() {
 }
 
 void CoreController::detachPrinter() {
-	if (platform() != PLATFORM_GB) {
+	if (platform() != mPLATFORM_GB) {
 		return;
 	}
 	Interrupter interrupter(this);
@@ -782,7 +864,7 @@ void CoreController::detachPrinter() {
 }
 
 void CoreController::endPrint() {
-	if (platform() != PLATFORM_GB) {
+	if (platform() != mPLATFORM_GB) {
 		return;
 	}
 	Interrupter interrupter(this);
@@ -792,7 +874,7 @@ void CoreController::endPrint() {
 
 #ifdef M_CORE_GBA
 void CoreController::attachBattleChipGate() {
-	if (platform() != PLATFORM_GBA) {
+	if (platform() != mPLATFORM_GBA) {
 		return;
 	}
 	Interrupter interrupter(this);
@@ -802,7 +884,7 @@ void CoreController::attachBattleChipGate() {
 }
 
 void CoreController::detachBattleChipGate() {
-	if (platform() != PLATFORM_GBA) {
+	if (platform() != mPLATFORM_GBA) {
 		return;
 	}
 	Interrupter interrupter(this);
@@ -810,7 +892,7 @@ void CoreController::detachBattleChipGate() {
 }
 
 void CoreController::setBattleChipId(uint16_t id) {
-	if (platform() != PLATFORM_GBA) {
+	if (platform() != mPLATFORM_GBA) {
 		return;
 	}
 	Interrupter interrupter(this);
@@ -818,7 +900,7 @@ void CoreController::setBattleChipId(uint16_t id) {
 }
 
 void CoreController::setBattleChipFlavor(int flavor) {
-	if (platform() != PLATFORM_GBA) {
+	if (platform() != mPLATFORM_GBA) {
 		return;
 	}
 	Interrupter interrupter(this);
@@ -849,7 +931,7 @@ void CoreController::startVideoLog(const QString& path, bool compression) {
 	if (!vf) {
 		return;
 	}
-	startVideoLog(vf);
+	startVideoLog(vf, compression);
 }
 
 void CoreController::startVideoLog(VFile* vf, bool compression) {
@@ -897,6 +979,9 @@ void CoreController::setFramebufferHandle(int fb) {
 	}
 	if (hasStarted()) {
 		m_threadContext.core->reloadConfigOption(m_threadContext.core, "hwaccelVideo", NULL);
+		if (!m_hwaccel) {
+			m_threadContext.core->setVideoBuffer(m_threadContext.core, reinterpret_cast<color_t*>(m_activeBuffer.data()), screenDimensions().width());
+		}
 	}
 }
 
@@ -927,14 +1012,22 @@ void CoreController::finishFrame() {
 		m_threadContext.core->desiredVideoDimensions(m_threadContext.core, &width, &height);
 
 		QMutexLocker locker(&m_bufferMutex);
-		memcpy(m_completeBuffer.data(), m_activeBuffer.constData(), 256 * height * BYTES_PER_PIXEL);
+		memcpy(m_completeBuffer.data(), m_activeBuffer.constData(), width * height * BYTES_PER_PIXEL);
 	}
 
-	QMutexLocker locker(&m_actionMutex);
-	QList<std::function<void ()>> frameActions(m_frameActions);
-	m_frameActions.clear();
-	for (auto& action : frameActions) {
-		action();
+	{
+		QMutexLocker locker(&m_actionMutex);
+		QList<std::function<void ()>> frameActions(m_frameActions);
+		m_frameActions.clear();
+		for (auto& action : frameActions) {
+			action();
+		}
+		if (m_moreFrames > 0) {
+			--m_moreFrames;
+			if (!m_moreFrames) {
+				mCoreThreadPauseFromThread(&m_threadContext);
+			}
+		}
 	}
 	updateKeys();
 
@@ -985,26 +1078,44 @@ void CoreController::updateFastForward() {
 	m_threadContext.core->reloadConfigOption(m_threadContext.core, NULL, NULL);
 }
 
-CoreController::Interrupter::Interrupter(CoreController* parent, bool fromThread)
+void CoreController::updateROMInfo() {
+	const NoIntroDB* db = GBAApp::app()->gameDB();
+	NoIntroGame game{};
+	m_crc32 = 0;
+	mCore* core = m_threadContext.core;
+	core->checksum(core, &m_crc32, mCHECKSUM_CRC32);
+
+	char gameTitle[17] = { '\0' };
+	core->getGameTitle(core, gameTitle);
+	m_internalTitle = QLatin1String(gameTitle);
+
+#ifdef USE_SQLITE3
+	if (db && m_crc32 && NoIntroDBLookupGameByCRC(db, m_crc32, &game)) {
+		m_dbTitle = QString::fromUtf8(game.name);
+	}
+#endif
+}
+
+CoreController::Interrupter::Interrupter(CoreController* parent)
 	: m_parent(parent)
 {
 	if (!m_parent->thread()->impl) {
 		return;
 	}
-	if (!fromThread) {
+	if (mCoreThreadGet() != m_parent->thread()) {
 		mCoreThreadInterrupt(m_parent->thread());
 	} else {
 		mCoreThreadInterruptFromThread(m_parent->thread());
 	}
 }
 
-CoreController::Interrupter::Interrupter(std::shared_ptr<CoreController> parent, bool fromThread)
+CoreController::Interrupter::Interrupter(std::shared_ptr<CoreController> parent)
 	: m_parent(parent.get())
 {
 	if (!m_parent->thread()->impl) {
 		return;
 	}
-	if (!fromThread) {
+	if (mCoreThreadGet() != m_parent->thread()) {
 		mCoreThreadInterrupt(m_parent->thread());
 	} else {
 		mCoreThreadInterruptFromThread(m_parent->thread());

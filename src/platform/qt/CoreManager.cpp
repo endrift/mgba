@@ -14,9 +14,6 @@
 #ifdef M_CORE_GBA
 #include <mgba/gba/core.h>
 #endif
-#ifdef M_CORE_GB
-#include <mgba/gb/core.h>
-#endif
 
 #include <mgba/core/core.h>
 #include <mgba-util/vfs.h>
@@ -29,57 +26,6 @@ void CoreManager::setConfig(const mCoreConfig* config) {
 
 void CoreManager::setMultiplayerController(MultiplayerController* multiplayer) {
 	m_multiplayer = multiplayer;
-}
-
-QByteArray CoreManager::getExtdata(const QString& filename, mStateExtdataTag extdataType) {
-	VFileDevice vf(filename, QIODevice::ReadOnly);
-
-	if (!vf.isOpen()) {
-		return {};
-	}
-
-	mStateExtdata extdata;
-	mStateExtdataInit(&extdata);
-
-	QByteArray bytes;
-	auto extract = [&bytes, &extdata, &vf, extdataType](mCore* core) -> bool {
-		if (mCoreExtractExtdata(core, vf, &extdata)) {
-			mStateExtdataItem extitem;
-			if (!mStateExtdataGet(&extdata, extdataType, &extitem)) {
-				return false;
-			}
-			if (extitem.size) {
-				bytes = QByteArray::fromRawData(static_cast<const char*>(extitem.data), extitem.size);
-			}
-			return true;
-		}
-		return false;
-	};
-
-	bool done = false;
-	struct mCore* core = nullptr;
-#ifdef USE_PNG
-	done = extract(nullptr);
-#endif
-#ifdef M_CORE_GBA
-	if (!done) {
-		core = GBACoreCreate();
-		core->init(core);
-		done = extract(core);
-		core->deinit(core);
-	}
-#endif
-#ifdef M_CORE_GB
-	if (!done) {
-		core = GBCoreCreate();
-		core->init(core);
-		done = extract(core);
-		core->deinit(core);
-	}
-#endif
-
-	mStateExtdataDeinit(&extdata);
-	return bytes;
 }
 
 CoreController* CoreManager::loadGame(const QString& path) {
@@ -114,7 +60,7 @@ CoreController* CoreManager::loadGame(const QString& path) {
 	VDir* archive = VDirOpenArchive(path.toUtf8().constData());
 	if (archive) {
 		VFile* vfOriginal = VDirFindFirst(archive, [](VFile* vf) {
-			return mCoreIsCompatible(vf) != PLATFORM_NONE;
+			return mCoreIsCompatible(vf) != mPLATFORM_NONE;
 		});
 		ssize_t size;
 		if (vfOriginal && (size = vfOriginal->size(vfOriginal)) > 0) {
@@ -188,7 +134,7 @@ CoreController* CoreManager::loadBIOS(int platform, const QString& path) {
 	mCore* core = nullptr;
 	switch (platform) {
 #ifdef M_CORE_GBA
-	case PLATFORM_GBA:
+	case mPLATFORM_GBA:
 		core = GBACoreCreate();
 		break;
 #endif

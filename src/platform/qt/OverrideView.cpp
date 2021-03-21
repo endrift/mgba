@@ -142,6 +142,7 @@ void OverrideView::updateOverrides() {
 		gba->override.hardware = HW_NO_OVERRIDE;
 		gba->override.idleLoop = IDLE_LOOP_NONE;
 		gba->override.mirroring = false;
+		gba->override.vbaBugCompat = false;
 
 		if (!m_ui.hwAutodetect->isChecked()) {
 			gba->override.hardware = HW_NONE;
@@ -163,6 +164,9 @@ void OverrideView::updateOverrides() {
 		}
 		if (m_ui.hwGBPlayer->isChecked()) {
 			gba->override.hardware |= HW_GB_PLAYER_DETECTION;
+		}
+		if (m_ui.vbaBugCompat->isChecked()) {
+			gba->override.vbaBugCompat = true;
 		}
 
 		bool ok;
@@ -209,7 +213,7 @@ void OverrideView::gameStarted() {
 
 	switch (thread->core->platform(thread->core)) {
 #ifdef M_CORE_GBA
-	case PLATFORM_GBA: {
+	case mPLATFORM_GBA: {
 		m_ui.tabWidget->setCurrentWidget(m_ui.tabGBA);
 		GBA* gba = static_cast<GBA*>(thread->core->board);
 		m_ui.savetype->setCurrentIndex(gba->memory.savedata.type + 1);
@@ -219,6 +223,7 @@ void OverrideView::gameStarted() {
 		m_ui.hwTilt->setChecked(gba->memory.hw.devices & HW_TILT);
 		m_ui.hwRumble->setChecked(gba->memory.hw.devices & HW_RUMBLE);
 		m_ui.hwGBPlayer->setChecked(gba->memory.hw.devices & HW_GB_PLAYER_DETECTION);
+		m_ui.vbaBugCompat->setChecked(gba->vbaBugCompat);
 
 		if (gba->idleLoop != IDLE_LOOP_NONE) {
 			m_ui.idleLoop->setText(QString::number(gba->idleLoop, 16));
@@ -229,7 +234,7 @@ void OverrideView::gameStarted() {
 	}
 #endif
 #ifdef M_CORE_GB
-	case PLATFORM_GB: {
+	case mPLATFORM_GB: {
 		m_ui.tabWidget->setCurrentWidget(m_ui.tabGB);
 		GB* gb = static_cast<GB*>(thread->core->board);
 		int index = m_ui.mbc->findData(gb->memory.mbcType);
@@ -247,7 +252,7 @@ void OverrideView::gameStarted() {
 		break;
 	}
 #endif
-	case PLATFORM_NONE:
+	case mPLATFORM_NONE:
 		break;
 	}
 

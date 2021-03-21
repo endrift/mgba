@@ -10,6 +10,8 @@
 
 CXX_GUARD_START
 
+#include <mgba/core/interface.h>
+
 enum GBModel {
 	GB_MODEL_AUTODETECT = 0xFF,
 	GB_MODEL_DMG  = 0x00,
@@ -40,6 +42,12 @@ enum GBMemoryBankControllerType {
 	GB_UNL_PKJD = 0x203,
 	GB_UNL_BBD = 0x220, // Also used as a mask for MBCs that need special read behavior
 	GB_UNL_HITEK = 0x221,
+};
+
+enum GBVideoLayer {
+	GB_LAYER_BACKGROUND = 0,
+	GB_LAYER_WINDOW,
+	GB_LAYER_OBJ
 };
 
 struct GBSIODriver {

@@ -46,15 +46,6 @@ struct GBAVideoSoftwareBackground {
 };
 
 enum {
-#ifdef COLOR_16_BIT
-#ifdef COLOR_5_6_5
-	GBA_COLOR_WHITE = 0xFFDF,
-#else
-	GBA_COLOR_WHITE = 0x7FFF,
-#endif
-#else
-	GBA_COLOR_WHITE = 0x00FFFFFF,
-#endif
 	OFFSET_PRIORITY = 30,
 	OFFSET_INDEX = 28,
 };
@@ -120,6 +111,8 @@ struct GBAVideoSoftwareRenderer {
 		struct GBAVideoWindowRegion h;
 		struct GBAVideoWindowRegion v;
 		struct WindowControl control;
+		int16_t offsetX;
+		int16_t offsetY;
 	} winN[2];
 
 	struct WindowControl winout;

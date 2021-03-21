@@ -32,7 +32,17 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 {
 	m_ui.setupUi(this);
 
+	m_pageIndex[Page::AV] = 0;
+	m_pageIndex[Page::INTERFACE] = 1;
+	m_pageIndex[Page::EMULATION] = 2;
+	m_pageIndex[Page::ENHANCEMENTS] = 3;
+	m_pageIndex[Page::BIOS] = 4;
+	m_pageIndex[Page::PATHS] = 5;
+	m_pageIndex[Page::LOGGING] = 6;
+
 #ifdef M_CORE_GB
+	m_pageIndex[Page::GB] = 7;
+
 	for (auto model : GameBoy::modelList()) {
 		m_ui.gbModel->addItem(GameBoy::modelName(model), model);
 		m_ui.sgbModel->addItem(GameBoy::modelName(model), model);
@@ -75,11 +85,7 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 		}
 	});
 	connect(m_ui.savegameBrowse, &QAbstractButton::pressed, [this] () {
-		QString path = GBAApp::app()->getOpenDirectoryName(this, "Select directory");
-		if (!path.isNull()) {
-			m_ui.savegameSameDir->setChecked(false);
-			m_ui.savegamePath->setText(path);
-		}
+		selectPath(m_ui.savegamePath, m_ui.savegameSameDir);
 	});
 
 	if (m_ui.savestatePath->text().isEmpty()) {
@@ -91,11 +97,7 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 		}
 	});
 	connect(m_ui.savestateBrowse, &QAbstractButton::pressed, [this] () {
-		QString path = GBAApp::app()->getOpenDirectoryName(this, "Select directory");
-		if (!path.isNull()) {
-			m_ui.savestateSameDir->setChecked(false);
-			m_ui.savestatePath->setText(path);
-		}
+		selectPath(m_ui.savestatePath, m_ui.savestateSameDir);
 	});
 
 	if (m_ui.screenshotPath->text().isEmpty()) {
@@ -107,11 +109,7 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 		}
 	});
 	connect(m_ui.screenshotBrowse, &QAbstractButton::pressed, [this] () {
-		QString path = GBAApp::app()->getOpenDirectoryName(this, "Select directory");
-		if (!path.isNull()) {
-			m_ui.screenshotSameDir->setChecked(false);
-			m_ui.screenshotPath->setText(path);
-		}
+		selectPath(m_ui.screenshotPath, m_ui.screenshotSameDir);
 	});
 
 	if (m_ui.patchPath->text().isEmpty()) {
@@ -123,11 +121,7 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 		}
 	});
 	connect(m_ui.patchBrowse, &QAbstractButton::pressed, [this] () {
-		QString path = GBAApp::app()->getOpenDirectoryName(this, "Select directory");
-		if (!path.isNull()) {
-			m_ui.patchSameDir->setChecked(false);
-			m_ui.patchPath->setText(path);
-		}
+		selectPath(m_ui.patchPath, m_ui.patchSameDir);
 	});
 
 	if (m_ui.cheatsPath->text().isEmpty()) {
@@ -139,11 +133,7 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 		}
 	});
 	connect(m_ui.cheatsBrowse, &QAbstractButton::pressed, [this] () {
-		QString path = GBAApp::app()->getOpenDirectoryName(this, "Select directory");
-		if (!path.isNull()) {
-			m_ui.cheatsSameDir->setChecked(false);
-			m_ui.cheatsPath->setText(path);
-		}
+		selectPath(m_ui.cheatsPath, m_ui.cheatsSameDir);
 	});
 	connect(m_ui.clearCache, &QAbstractButton::pressed, this, &SettingsView::libraryCleared);
 
@@ -276,8 +266,7 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 #endif
 
 	GBAKeyEditor* editor = new GBAKeyEditor(inputController, InputController::KEYBOARD, QString(), this);
-	m_ui.stackedWidget->addWidget(editor);
-	m_ui.tabs->addItem(tr("Keyboard"));
+	addPage(tr("Keyboard"), editor, Page::KEYBOARD);
 	connect(m_ui.buttonBox, &QDialogButtonBox::accepted, editor, &GBAKeyEditor::save);
 
 	GBAKeyEditor* buttonEditor = nullptr;
@@ -285,8 +274,7 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 	inputController->recalibrateAxes();
 	const char* profile = inputController->profileForType(SDL_BINDING_BUTTON);
 	buttonEditor = new GBAKeyEditor(inputController, SDL_BINDING_BUTTON, profile);
-	m_ui.stackedWidget->addWidget(buttonEditor);
-	m_ui.tabs->addItem(tr("Controllers"));
+	addPage(tr("Controllers"), buttonEditor, Page::CONTROLLERS);
 	connect(m_ui.buttonBox, &QDialogButtonBox::accepted, buttonEditor, &GBAKeyEditor::save);
 #endif
 
@@ -332,8 +320,7 @@ SettingsView::SettingsView(ConfigController* controller, InputController* inputC
 	ShortcutView* shortcutView = new ShortcutView();
 	shortcutView->setController(shortcutController);
 	shortcutView->setInputController(inputController);
-	m_ui.stackedWidget->addWidget(shortcutView);
-	m_ui.tabs->addItem(tr("Shortcuts"));
+	addPage(tr("Shortcuts"), shortcutView, Page::SHORTCUTS);
 }
 
 SettingsView::~SettingsView() {
@@ -361,10 +348,33 @@ void SettingsView::setShaderSelector(ShaderSelector* shaderSelector) {
 #endif
 }
 
+void SettingsView::selectPage(SettingsView::Page page) {
+	m_ui.tabs->setCurrentRow(m_pageIndex[page]);
+}
+
+QString SettingsView::makePortablePath(const QString& path) {
+	if (m_controller->isPortable()) {
+		QDir configDir(m_controller->configDir());
+		QFileInfo pathInfo(path);
+		if (pathInfo.canonicalPath() == configDir.canonicalPath()) {
+			return configDir.relativeFilePath(pathInfo.canonicalFilePath());
+		}
+	}
+	return path;
+}
+
 void SettingsView::selectBios(QLineEdit* bios) {
 	QString filename = GBAApp::app()->getOpenFileName(this, tr("Select BIOS"));
 	if (!filename.isEmpty()) {
-		bios->setText(filename);
+		bios->setText(makePortablePath(filename));
+	}
+}
+
+void SettingsView::selectPath(QLineEdit* field, QCheckBox* sameDir) {
+	QString path = GBAApp::app()->getOpenDirectoryName(this, tr("Select directory"));
+	if (!path.isNull()) {
+		sameDir->setChecked(false);
+		field->setText(makePortablePath(path));
 	}
 }
 
@@ -416,6 +426,9 @@ void SettingsView::updateConfig() {
 	saveSetting("logFile", m_ui.logFile);
 	saveSetting("useDiscordPresence", m_ui.useDiscordPresence);
 	saveSetting("gba.audioHle", m_ui.audioHle);
+	saveSetting("dynamicTitle", m_ui.dynamicTitle);
+	saveSetting("videoScale", m_ui.videoScale);
+	saveSetting("gba.forceGbp", m_ui.forceGbp);
 
 	if (m_ui.audioBufferSize->currentText().toInt() > 8192) {
 		m_ui.audioBufferSize->setCurrentText("8192");
@@ -501,9 +514,6 @@ void SettingsView::updateConfig() {
 		emit languageChanged();
 	}
 
-	int videoScale = m_controller->getOption("videoScale", 1).toInt();
-	saveSetting("videoScale", m_ui.videoScale);
-
 	int hwaccelVideo = m_controller->getOption("hwaccelVideo").toInt();
 	saveSetting("hwaccelVideo", m_ui.hwaccelVideo->currentIndex());
 	if (hwaccelVideo != m_ui.hwaccelVideo->currentIndex()) {
@@ -554,7 +564,7 @@ void SettingsView::updateConfig() {
 	m_controller->write();
 
 	emit pathsChanged();
-	emit biosLoaded(PLATFORM_GBA, m_ui.gbaBios->text());
+	emit biosLoaded(mPLATFORM_GBA, m_ui.gbaBios->text());
 }
 
 void SettingsView::reloadConfig() {	
@@ -607,6 +617,8 @@ void SettingsView::reloadConfig() {
 	loadSetting("logFile", m_ui.logFile);
 	loadSetting("useDiscordPresence", m_ui.useDiscordPresence);
 	loadSetting("gba.audioHle", m_ui.audioHle);
+	loadSetting("dynamicTitle", m_ui.dynamicTitle, true);
+	loadSetting("gba.forceGbp", m_ui.forceGbp);
 
 	m_ui.libraryStyle->setCurrentIndex(loadSetting("libraryStyle").toInt());
 
@@ -702,6 +714,12 @@ void SettingsView::reloadConfig() {
 		m_ui.videoScaleSize->setText(tr("(%1×%2)").arg(GBA_VIDEO_HORIZONTAL_PIXELS * value).arg(GBA_VIDEO_VERTICAL_PIXELS * value));
 	});
 	loadSetting("videoScale", m_ui.videoScale, 1);
+}
+
+void SettingsView::addPage(const QString& name, QWidget* view, Page index) {
+	m_pageIndex[index] = m_ui.tabs->count();
+	m_ui.tabs->addItem(name);
+	m_ui.stackedWidget->addWidget(view);
 }
 
 void SettingsView::saveSetting(const char* key, const QAbstractButton* field) {

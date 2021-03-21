@@ -16,6 +16,7 @@
 
 #include <QFileInfo>
 #include <QFileOpenEvent>
+#include <QFontDatabase>
 #include <QIcon>
 
 #include <mgba-util/socket.h>
@@ -38,6 +39,7 @@ mLOG_DEFINE_CATEGORY(QT, "Qt", "platform.qt");
 GBAApp::GBAApp(int& argc, char* argv[], ConfigController* config)
 	: QApplication(argc, argv)
 	, m_configController(config)
+	, m_monospace(QFontDatabase::systemFont(QFontDatabase::FixedFont))
 {
 	g_app = this;
 
@@ -112,7 +114,6 @@ Window* GBAApp::newWindow() {
 		return nullptr;
 	}
 	Window* w = new Window(&m_manager, m_configController, m_multiplayer.attached());
-	int windowId = m_multiplayer.attached();
 	connect(w, &Window::destroyed, [this, w]() {
 		m_windows.removeAll(w);
 		for (Window* w : m_windows) {
@@ -185,12 +186,12 @@ QString GBAApp::getSaveFileName(QWidget* owner, const QString& title, const QStr
 	return filename;
 }
 
-QString GBAApp::getOpenDirectoryName(QWidget* owner, const QString& title) {
+QString GBAApp::getOpenDirectoryName(QWidget* owner, const QString& title, const QString& path) {
 	QList<Window*> paused;
 	pauseAll(&paused);
-	QString filename = QFileDialog::getExistingDirectory(owner, title, m_configController->getOption("lastDirectory"));
+	QString filename = QFileDialog::getExistingDirectory(owner, title, !path.isNull() ? path : m_configController->getOption("lastDirectory"));
 	continueAll(paused);
-	if (!filename.isEmpty()) {
+	if (path.isNull() && !filename.isEmpty()) {
 		m_configController->setOption("lastDirectory", QFileInfo(filename).dir().canonicalPath());
 	}
 	return filename;

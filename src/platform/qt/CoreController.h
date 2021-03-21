@@ -53,8 +53,8 @@ public:
 
 	class Interrupter {
 	public:
-		Interrupter(CoreController*, bool fromThread = false);
-		Interrupter(std::shared_ptr<CoreController>, bool fromThread = false);
+		Interrupter(CoreController*);
+		Interrupter(std::shared_ptr<CoreController>);
 		Interrupter(const Interrupter&);
 		~Interrupter();
 
@@ -72,6 +72,10 @@ public:
 
 	bool isPaused();
 	bool hasStarted();
+
+	QString title() { return m_dbTitle.isNull() ? m_internalTitle : m_dbTitle; }
+	QString intenralTitle() { return m_internalTitle; }
+	QString dbTitle() { return m_dbTitle; }
 
 	mPlatform platform() const;
 	QSize screenDimensions() const;
@@ -120,9 +124,11 @@ public slots:
 	void forceFastForward(bool);
 
 	void loadState(int slot = 0);
-	void loadState(const QString& path);
+	void loadState(const QString& path, int flags = -1);
+	void loadState(QIODevice* iodev, int flags = -1);
 	void saveState(int slot = 0);
-	void saveState(const QString& path);
+	void saveState(const QString& path, int flags = -1);
+	void saveState(QIODevice* iodev, int flags = -1);
 	void loadBackupState();
 	void saveBackupState();
 
@@ -199,9 +205,15 @@ private:
 
 	void updateFastForward();
 
+	void updateROMInfo();
+
 	mCoreThread m_threadContext{};
 
 	bool m_patched = false;
+
+	uint32_t m_crc32;
+	QString m_internalTitle;
+	QString m_dbTitle;
 
 	QByteArray m_activeBuffer;
 	QByteArray m_completeBuffer;
@@ -213,6 +225,7 @@ private:
 	QList<std::function<void()>> m_resetActions;
 	QList<std::function<void()>> m_frameActions;
 	QMutex m_actionMutex{QMutex::Recursive};
+	int m_moreFrames = -1;
 	QMutex m_bufferMutex;
 
 	int m_activeKeys = 0;
@@ -224,6 +237,7 @@ private:
 	QByteArray m_backupSaveState{nullptr};
 	int m_stateSlot = 1;
 	QString m_statePath;
+	VFile* m_stateVf;
 	int m_loadStateFlags;
 	int m_saveStateFlags;
 

@@ -10,6 +10,7 @@
 
 #include <QImage>
 #include <QMutex>
+#include <QReadWriteLock>
 #include <QObject>
 #include <QSet>
 #include <QTimer>
@@ -79,6 +80,7 @@ public:
 	void unbindAllAxes(uint32_t type);
 
 	void bindHat(uint32_t type, int hat, GamepadHatEvent::Direction, GBAKey);
+	void unbindAllHats(uint32_t type);
 
 	QStringList connectedGamepads(uint32_t type) const;
 	int gamepad(uint32_t type) const;
@@ -152,7 +154,7 @@ private:
 		QImage resizedImage;
 		bool outOfDate;
 		QMutex mutex;
-		unsigned w, h;
+		int w, h;
 	} m_image;
 
 #ifdef BUILD_QT_MULTIMEDIA
@@ -181,6 +183,7 @@ private:
 	QTimer m_gamepadTimer{nullptr};
 
 	QSet<GBAKey> m_pendingEvents;
+	QReadWriteLock m_eventsLock;
 };
 
 }
