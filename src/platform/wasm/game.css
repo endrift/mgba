@@ -1,0 +1,260 @@
+mgba-game {
+  display: block;
+  --controls-scale: min(13vw, 80px);
+  --half-width-control: 47vw;
+  --dpad-width: calc(1.15 * var(--half-width-control));
+  --ab-width: calc(0.95 * var(--half-width-control));
+}
+
+body.in-game {
+  overflow: hidden;
+}
+
+#canvas {
+  image-rendering: crisp-edges; /* TODO make this configurable */
+  width: 100vw;
+  /* height: 100vh; */
+  object-fit: contain;
+  display: block;
+  /*position: absolute;*/
+  background-color: black;
+}
+#canvas.disabled {
+  display: none;
+}
+
+mgba-game .placeholder {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+mgba-game .button-container {
+  position: fixed;
+  top: 0;
+  /* TODO what does left and right 0 do? */
+  left: 0;
+  right: 0;
+
+  display: grid;
+  grid-template-rows: 1fr auto auto auto;
+  height: calc(100% - env(safe-area-inset-bottom));
+
+  z-index: 5;
+  opacity: 0.7;
+  font-family: sans-serif;
+
+  /* TODO consider using padding-top for the canvas */
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-top: env(safe-area-inset-top);
+}
+
+mgba-game .button {
+  background-color: white;
+  color: black;
+  border-radius: calc(0.2*var(--controls-scale));
+}
+
+mgba-game .shoulder-row {
+  display: flex;
+  justify-content: space-between;
+}
+mgba-game .L,
+mgba-game .R {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+
+  width: calc(2*var(--controls-scale));
+  height: calc(1*var(--controls-scale));
+}
+mgba-game .L::before {
+  content: 'L';
+}
+mgba-game .R::before {
+  content: 'R';
+}
+
+mgba-game .controls-row {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* TODO implement pressed state for dpad */
+mgba-game .dpad {
+  height: var(--dpad-width);
+  width: var(--dpad-width);
+
+  display: grid;
+  grid-template-columns: auto auto auto;
+}
+mgba-game .dpad > div {
+  width: 100%;
+  height: 100%;
+  border: 1px solid black;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 22px;
+  color: black;
+  background-color: white;
+  --dpad-border-radius: calc(0.25*var(--controls-scale));
+}
+mgba-game .dpad .up-left {
+  border-top-left-radius: var(--dpad-border-radius);
+}
+mgba-game .dpad .up-right {
+  border-top-right-radius: var(--dpad-border-radius);
+}
+mgba-game .dpad .down-right {
+  border-bottom-right-radius: var(--dpad-border-radius);
+}
+mgba-game .dpad .down-left {
+  border-bottom-left-radius: var(--dpad-border-radius);
+}
+mgba-game .dpad > div::before {
+  content: '⬆';
+}
+mgba-game .dpad .up-left::before {
+  transform: rotate(-45deg);
+}
+mgba-game .dpad .up-right::before {
+  transform: rotate(45deg);
+}
+mgba-game .dpad .right::before {
+  transform: rotate(90deg);
+}
+mgba-game .dpad .down-right::before {
+  transform: rotate(135deg);
+}
+mgba-game .dpad .down::before {
+  transform: rotate(180deg);
+}
+mgba-game .dpad .down-left::before {
+  transform: rotate(225deg);
+}
+mgba-game .dpad .left::before {
+  transform: rotate(-90deg);
+}
+mgba-game .dpad > .center::before {
+  content: '';
+}
+mgba-game .ab-container {
+  display: grid;
+  grid-template-columns: auto auto;
+  height: 100%;
+  width: var(--ab-width);
+}
+mgba-game .ab-container > div {
+  width: 100%;
+  height: 100%;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 30px;
+}
+mgba-game .A::before {
+  content: 'A';
+}
+mgba-game .B::before {
+  content: 'B';
+}
+
+mgba-game .menu-row {
+  /*display: flex;
+  justify-content: space-between;*/
+  display: grid;
+  grid-template-columns: 1fr auto;
+}
+mgba-game .menu-speed-container,
+mgba-game .select-start-container {
+  width: var(--half-width-control);
+  display: flex;
+}
+mgba-game .select,
+mgba-game .start,
+mgba-game .menu,
+mgba-game .speed {
+  margin: 5px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+mgba-game .select,
+mgba-game .start,
+mgba-game .menu,
+mgba-game .speed {
+  width: calc(2*var(--controls-scale));
+  height: calc(var(--controls-scale));
+}
+mgba-game .select::before {
+  content: 'SELECT';
+}
+mgba-game .start::before {
+  content: 'START';
+}
+mgba-game .menu::before {
+  content: 'MENU';
+}
+
+/* this is intended for mobile devices */
+@media (min-width: 481px) {
+  mgba-game {
+    --controls-scale: min(75px, 15vh);
+    --half-width-control: calc(3*var(--controls-scale));
+  }
+  /*#canvas {
+    height: 100vh;
+  }*/
+}
+
+@media (min-aspect-ratio: 1/1) { /* widescreen/landscape */
+  /* shrink the canvas towards the middle to not overlay with the controls */
+  /*#button-container::before {
+    content: ' ';
+    display: block;
+  }*/
+  mgba-game .button-container {
+    /* for some reason safe-area-inset-top is always zero on ios.
+     * this makes the L and R buttons get chopped off by the top corners. */
+    padding-left: 0;
+    padding-right: 0;
+    /* commenting out height so the buttons go all the way
+     * to the bottom of the screen. also padding-top for
+     * more vertical room. */
+    /*padding-top: env(safe-area-inset-bottom);*/
+    /*height: calc(100% - 2 * env(safe-area-inset-bottom));*/
+    height: 100%;
+    width: 100%;
+  }
+  #canvas-container {
+    height: 100vh;
+    position: fixed;
+    display: grid;
+    grid-template-columns: var(--dpad-width) auto var(--ab-width);
+    width: 100vw;
+    /*display: flex;*/
+    z-index: -1; /* this makes the buttons pressable */
+  }
+  #canvas {
+    width: 100%;
+    max-height: 100vh;
+  }
+
+  mgba-game .ab-container {
+    grid-template-columns: unset;
+    grid-template-rows: auto auto;
+    grid-gap: 6px;
+  }
+  mgba-game .ab-container > div {
+  }
+  mgba-game .ab-container > div.ab-placeholder {
+    display: none;
+  }
+}

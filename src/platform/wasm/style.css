@@ -1,0 +1,21 @@
+:root {
+  /* TODO make this configurable */
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+mgba-storage dialog div {
+  user-select: all;
+  -webkit-user-select: all;
+}
+
+button {
+  font-size: 24px;
+  margin: 10px;
+  padding: 10px;
+}
