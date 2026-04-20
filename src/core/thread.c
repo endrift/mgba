@@ -11,6 +11,7 @@
 #include <mgba/core/scripting.h>
 #endif
 #include <mgba/core/serialize.h>
+#include <mgba/core/timing.h>
 #include <mgba-util/patch.h>
 #include <mgba-util/vfs.h>
 
@@ -201,6 +202,7 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 		.context = threadContext
 	};
 	core->setSync(core, &threadContext->impl->sync);
+	mCoreSyncSetCoreParams(&threadContext->impl->sync, core);
 
 	struct mLogFilter filter;
 	struct mLogger* logger = &threadContext->logger.d;
@@ -261,7 +263,7 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 		if (debugger) {
 			while (impl->state == mTHREAD_RUNNING) {
 				MutexUnlock(&impl->stateMutex);
-				if (mCoreSyncWait(&impl->sync, 1)) {
+				if (mCoreSyncWait(&impl->sync, mTimingCurrentTime(core->timing), 1)) {
 					mDebuggerRun(debugger);
 				}
 				MutexLock(&impl->stateMutex);
@@ -274,7 +276,7 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 		{
 			while (impl->state == mTHREAD_RUNNING) {
 				MutexUnlock(&impl->stateMutex);
-				if (!mCoreSyncWait(&impl->sync, 1)) {
+				if (!mCoreSyncWait(&impl->sync, mTimingCurrentTime(core->timing), 1)) {
 					MutexLock(&impl->stateMutex);
 					break;
 				}
@@ -308,6 +310,7 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 			}
 		}
 
+		int removedRequests = pendingRequests & ~impl->requested;
 		impl->requested &= ~pendingRequests | mTHREAD_REQ_PAUSE | mTHREAD_REQ_WAIT | mTHREAD_REQ_CRASHED | mTHREAD_REQ_REWIND_EMPTY;
 		pendingRequests = impl->requested;
 
@@ -328,6 +331,9 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 			} else {
 				_changeState(impl, mTHREAD_RUNNING);
 			}
+		}
+		if (removedRequests & (mTHREAD_REQ_PAUSE | mTHREAD_CRASHED | mTHREAD_REQ_REWIND_EMPTY)) {
+			mCoreSyncResetClock(&impl->sync);
 		}
 		MutexUnlock(&impl->stateMutex);
 

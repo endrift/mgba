@@ -59,6 +59,7 @@ struct mCoreOptions {
 
 	bool videoSync;
 	bool audioSync;
+	bool clockSync;
 };
 
 void mCoreConfigInit(struct mCoreConfig*, const char* port);

@@ -454,6 +454,7 @@ void mCoreConfigMap(const struct mCoreConfig* config, struct mCoreOptions* opts)
 
 	_lookupBoolValue(config, "audioSync", &opts->audioSync);
 	_lookupBoolValue(config, "videoSync", &opts->videoSync);
+	_lookupBoolValue(config, "clockSync", &opts->clockSync);
 
 	_lookupBoolValue(config, "lockAspectRatio", &opts->lockAspectRatio);
 	_lookupBoolValue(config, "lockIntegerScaling", &opts->lockIntegerScaling);
@@ -493,6 +494,7 @@ void mCoreConfigLoadDefaults(struct mCoreConfig* config, const struct mCoreOptio
 	ConfigurationSetUIntValue(&config->defaultsTable, 0, "sampleRate", opts->sampleRate);
 	ConfigurationSetIntValue(&config->defaultsTable, 0, "audioSync", opts->audioSync);
 	ConfigurationSetIntValue(&config->defaultsTable, 0, "videoSync", opts->videoSync);
+	ConfigurationSetIntValue(&config->defaultsTable, 0, "clockSync", opts->clockSync);
 	ConfigurationSetIntValue(&config->defaultsTable, 0, "fullscreen", opts->fullscreen);
 	ConfigurationSetIntValue(&config->defaultsTable, 0, "width", opts->width);
 	ConfigurationSetIntValue(&config->defaultsTable, 0, "height", opts->height);

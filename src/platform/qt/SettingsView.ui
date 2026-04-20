@@ -533,6 +533,13 @@
            </property>
           </widget>
          </item>
+         <item>
+          <widget class="QCheckBox" name="clockSync">
+           <property name="text">
+            <string>Clock</string>
+           </property>
+          </widget>
+         </item>
         </layout>
        </item>
        <item row="3" column="0" colspan="2">

@@ -50,6 +50,7 @@ Q_OBJECT
 public:
 	static const bool VIDEO_SYNC = false;
 	static const bool AUDIO_SYNC = true;
+	static const bool CLOCK_SYNC = false;
 
 	enum class Feature {
 		OPENGL = mCORE_FEATURE_OPENGL,
@@ -137,6 +138,7 @@ public:
 
 	bool audioSync() const { return m_audioSync; }
 	bool videoSync() const { return m_videoSync; }
+	bool clockSync() const { return m_clockSync; }
 
 	void addFrameAction(std::function<void ()> callback);
 	uint64_t frameCounter() const { return m_frameCounter; }
@@ -306,6 +308,7 @@ private:
 
 	bool m_audioSync = AUDIO_SYNC;
 	bool m_videoSync = VIDEO_SYNC;
+	bool m_clockSync = CLOCK_SYNC;
 
 	bool m_autosave;
 	bool m_autoload;

@@ -298,6 +298,7 @@ void CoreController::loadConfig(ConfigController* config) {
 	m_fastForwardHeldRatio = config->getOption("fastForwardHeldRatio", m_fastForwardRatio).toFloat();
 	m_videoSync = config->getOption("videoSync", m_videoSync).toInt();
 	m_audioSync = config->getOption("audioSync", m_audioSync).toInt();
+	m_clockSync = config->getOption("clockSync", m_clockSync).toInt();
 	m_fpsTarget = config->getOption("fpsTarget").toFloat();
 	m_autosave = config->getOption("autosave", false).toInt();
 	m_autoload = config->getOption("autoload", true).toInt();
@@ -319,6 +320,7 @@ void CoreController::loadConfig(ConfigController* config) {
 	m_threadContext.core->setVideoBuffer(m_threadContext.core, reinterpret_cast<mColor*>(m_activeBuffer.data()), sizeAfter.width());
 
 	if (hasStarted()) {
+		mCoreSyncSetFpsTarget(&m_threadContext.impl->sync, m_fpsTarget);
 		updateFastForward();
 		mCoreThreadRewindParamsChanged(&m_threadContext);
 	}
@@ -1302,28 +1304,24 @@ void CoreController::updateFastForward() {
 		}
 		m_threadContext.core->opts.mute = m_fastForwardMute || m_mute;
 
-		float newFpsTarget = 0;
+		float ratio = 0;
 
 		// If we aren't holding the fast forward button
 		// then use the non "(held)" ratio
 		if (!m_fastForward) {
 			if (m_fastForwardRatio > 0) {
-				newFpsTarget = m_fpsTarget * m_fastForwardRatio;
+				ratio = m_fastForwardRatio;
 			}
 		} else {
 			// If we are holding the fast forward button,
 			// then use the held ratio
 			if (m_fastForwardHeldRatio > 0) {
-				newFpsTarget = m_fpsTarget * m_fastForwardHeldRatio;
+				ratio = m_fastForwardHeldRatio;
 			}
 		}
 
-		if (newFpsTarget) {
-			mCoreSyncSetFpsTarget(&m_threadContext.impl->sync, newFpsTarget);
-			mCoreSyncLock(&m_threadContext.impl->sync);
-			mCoreSyncSetAudioSync(&m_threadContext.impl->sync, true);
-			mCoreSyncSetVideoSync(&m_threadContext.impl->sync, false);
-			mCoreSyncUnlock(&m_threadContext.impl->sync);
+		if (ratio) {
+			mCoreSyncSetSpeedMultiplier(&m_threadContext.impl->sync, ratio);
 			setSync(true);
 		} else {
 			setSync(false);
@@ -1334,11 +1332,7 @@ void CoreController::updateFastForward() {
 		}
 		mCoreConfigGetBoolValue(&m_threadContext.core->config, "mute", &m_threadContext.core->opts.mute);
 
-		mCoreSyncSetFpsTarget(&m_threadContext.impl->sync, m_fpsTarget);
-		mCoreSyncLock(&m_threadContext.impl->sync);
-		mCoreSyncSetAudioSync(&m_threadContext.impl->sync, m_audioSync);
-		mCoreSyncSetVideoSync(&m_threadContext.impl->sync, m_videoSync);
-		mCoreSyncUnlock(&m_threadContext.impl->sync);
+		mCoreSyncSetSpeedMultiplier(&m_threadContext.impl->sync, 1);
 		setSync(true);
 	}
 

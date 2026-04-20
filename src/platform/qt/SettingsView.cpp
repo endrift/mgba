@@ -497,6 +497,7 @@ void SettingsView::updateConfig() {
 	saveSetting("sampleRate", m_ui.sampleRate);
 	saveSetting("videoSync", m_ui.videoSync);
 	saveSetting("audioSync", m_ui.audioSync);
+	saveSetting("clockSync", m_ui.clockSync);
 	saveSetting("frameskip", m_ui.frameskip);
 	saveSetting("autofireThreshold", m_ui.autofireThreshold);
 	saveSetting("lockAspectRatio", m_ui.lockAspectRatio);
@@ -720,6 +721,7 @@ void SettingsView::reloadConfig() {
 	loadSetting("sampleRate", m_ui.sampleRate);
 	loadSetting("videoSync", m_ui.videoSync);
 	loadSetting("audioSync", m_ui.audioSync);
+	loadSetting("clockSync", m_ui.clockSync);
 	loadSetting("frameskip", m_ui.frameskip);
 	loadSetting("fpsTarget", m_ui.fpsTarget);
 	loadSetting("autofireThreshold", m_ui.autofireThreshold);
