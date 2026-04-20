@@ -13,22 +13,39 @@ CXX_GUARD_START
 #include <mgba-util/threading.h>
 
 struct mCoreSync {
-	int videoFramePending;
-	bool videoFrameWait;
-	Mutex videoFrameMutex;
-	Condition videoFrameAvailableCond;
-	Condition videoFrameRequiredCond;
+	Mutex mutex;
+	Condition readyCond;
+	bool interrupt;
+	bool busy;
+	bool active;
 
-	bool audioWait;
-	Condition audioRequiredCond;
-	Mutex audioBufferMutex;
+	bool audioSync;
+	bool videoSync;
+
+	int videoFramePending;
+	Condition videoFrameAvailableCond;
+
 	size_t audioHighWater;
+	const struct mAudioBuffer* audioBuffer;
 
 	float fpsTarget;
 };
 
+void mCoreSyncInit(struct mCoreSync* sync);
+void mCoreSyncDeinit(struct mCoreSync* sync);
+
+void mCoreSyncSetFpsTarget(struct mCoreSync* sync, float fpsTarget);
+void mCoreSyncSetActive(struct mCoreSync* sync, bool active);
+
 struct mCoreOptions;
 void mCoreSyncLoadCoreOpts(struct mCoreSync* sync, const struct mCoreOptions* opts);
+
+void mCoreSyncLock(struct mCoreSync* sync);
+void mCoreSyncUnlock(struct mCoreSync* sync);
+bool mCoreSyncWait(struct mCoreSync* sync, int timeoutMs);
+
+void mCoreSyncInterrupt(struct mCoreSync* sync);
+void mCoreSyncResume(struct mCoreSync* sync);
 
 void mCoreSyncPostFrame(struct mCoreSync* sync);
 void mCoreSyncForceFrame(struct mCoreSync* sync);
@@ -38,9 +55,8 @@ void mCoreSyncSetVideoSync(struct mCoreSync* sync, bool wait);
 
 struct mAudioBuffer;
 bool mCoreSyncProduceAudio(struct mCoreSync* sync, const struct mAudioBuffer*);
-void mCoreSyncLockAudio(struct mCoreSync* sync);
-void mCoreSyncUnlockAudio(struct mCoreSync* sync);
 void mCoreSyncConsumeAudio(struct mCoreSync* sync);
+void mCoreSyncSetAudioSync(struct mCoreSync* sync, bool wait);
 
 CXX_GUARD_END
 

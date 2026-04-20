@@ -132,7 +132,7 @@ void GBAudioReset(struct GBAudio* audio) {
 }
 
 void GBAudioResizeBuffer(struct GBAudio* audio, size_t samples) {
-	mCoreSyncLockAudio(audio->p->sync);
+	mCoreSyncLock(audio->p->sync);
 	audio->samples = samples;
 	mCoreSyncConsumeAudio(audio->p->sync);
 }
@@ -828,7 +828,7 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 	struct GBAudio* audio = user;
 	GBAudioSample(audio, mTimingCurrentTime(audio->timing));
 
-	mCoreSyncLockAudio(audio->p->sync);
+	mCoreSyncLock(audio->p->sync);
 	mAudioBufferWrite(&audio->buffer, (int16_t*) audio->currentSamples, GB_MAX_SAMPLES);
 	if (audio->p->stream) {
 		if (audio->p->stream->postAudioFrame) {

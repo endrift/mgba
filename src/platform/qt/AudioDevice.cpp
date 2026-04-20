@@ -35,12 +35,12 @@ void AudioDevice::setFormat(const QAudioFormat& format) {
 		LOG(QT, INFO) << tr("Can't set format of context-less audio device");
 		return;
 	}
-	mCoreSyncLockAudio(&m_context->impl->sync);
+	mCoreSyncLock(&m_context->impl->sync);
 	mCore* core = m_context->core;
 	mAudioResamplerSetSource(&m_resampler, core->getAudioBuffer(core), core->audioSampleRate(core), true);
 	m_format = format;
 	adjustResampler();
-	mCoreSyncUnlockAudio(&m_context->impl->sync);
+	mCoreSyncUnlock(&m_context->impl->sync);
 }
 
 void AudioDevice::setBufferSamples(int samples) {
@@ -61,13 +61,13 @@ qint64 AudioDevice::readData(char* data, qint64 maxSize) {
 		return 0;
 	}
 
-	mCoreSyncLockAudio(&m_context->impl->sync);
+	mCoreSyncLock(&m_context->impl->sync);
 	mAudioResamplerProcess(&m_resampler);
 	if (mAudioBufferAvailable(&m_buffer) < 128) {
 		mCoreSyncConsumeAudio(&m_context->impl->sync);
 		// Audio is running slow...let's wait a tiny bit for more to come in
 		QThread::usleep(100);
-		mCoreSyncLockAudio(&m_context->impl->sync);
+		mCoreSyncLock(&m_context->impl->sync);
 		mAudioResamplerProcess(&m_resampler);
 	}
 	quint64 available = std::min<quint64>({
@@ -101,11 +101,11 @@ qint64 AudioDevice::bytesAvailable() {
 	if (!m_context->core) {
 		return true;
 	}
-	mCoreSyncLockAudio(&m_context->impl->sync);
+	mCoreSyncLock(&m_context->impl->sync);
 	adjustResampler();
 	mAudioResamplerProcess(&m_resampler);
 	int available = mAudioBufferAvailable(&m_buffer);
-	mCoreSyncUnlockAudio(&m_context->impl->sync);
+	mCoreSyncUnlock(&m_context->impl->sync);
 	return available * sizeof(mStereoSample);
 }
 

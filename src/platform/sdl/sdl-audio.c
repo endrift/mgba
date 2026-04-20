@@ -135,7 +135,7 @@ static void _mSDLAudioCallback(void* context, Uint8* data, int len) {
 		if (audioContext->sync->fpsTarget > 0 && audioContext->core) {
 			fauxClock = mCoreCalculateFramerateRatio(audioContext->core, audioContext->sync->fpsTarget);
 		}
-		mCoreSyncLockAudio(audioContext->sync);
+		mCoreSyncLock(audioContext->sync);
 		audioContext->sync->audioHighWater = audioContext->samples + audioContext->resampler.highWaterMark + audioContext->resampler.lowWaterMark + (audioContext->samples >> 6);
 		audioContext->sync->audioHighWater *= sampleRate / (fauxClock * audioContext->obtainedSpec.freq);
 	}

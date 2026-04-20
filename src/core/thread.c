@@ -47,7 +47,7 @@ static void _changeState(struct mCoreThreadInternal* threadContext, enum mCoreTh
 
 static void _waitOnInterrupt(struct mCoreThreadInternal* threadContext) {
 	while (threadContext->state == mTHREAD_INTERRUPTED || threadContext->state == mTHREAD_INTERRUPTING) {
-		ConditionWait(&threadContext->stateOnThreadCond, &threadContext->stateMutex);
+		ConditionWait(&threadContext->stateOffThreadCond, &threadContext->stateMutex);
 	}
 }
 
@@ -68,38 +68,8 @@ static void _pokeRequest(struct mCoreThreadInternal* threadContext) {
 	}
 }
 
-static void _waitPrologue(struct mCoreThreadInternal* threadContext, bool* videoFrameWait, bool* audioWait) {
-	MutexLock(&threadContext->sync.videoFrameMutex);
-	*videoFrameWait = threadContext->sync.videoFrameWait;
-	threadContext->sync.videoFrameWait = false;
-	MutexUnlock(&threadContext->sync.videoFrameMutex);
-	MutexLock(&threadContext->sync.audioBufferMutex);
-	*audioWait = threadContext->sync.audioWait;
-	threadContext->sync.audioWait = false;
-	MutexUnlock(&threadContext->sync.audioBufferMutex);
-}
-
-static void _waitEpilogue(struct mCoreThreadInternal* threadContext, bool videoFrameWait, bool audioWait) {
-	MutexLock(&threadContext->sync.audioBufferMutex);
-	threadContext->sync.audioWait = audioWait;
-	MutexUnlock(&threadContext->sync.audioBufferMutex);
-	MutexLock(&threadContext->sync.videoFrameMutex);
-	threadContext->sync.videoFrameWait = videoFrameWait;
-	MutexUnlock(&threadContext->sync.videoFrameMutex);
-}
-
 static void _wait(struct mCoreThreadInternal* threadContext) {
 	MutexUnlock(&threadContext->stateMutex);
-
-	if (!MutexTryLock(&threadContext->sync.videoFrameMutex)) {
-		ConditionWake(&threadContext->sync.videoFrameRequiredCond);
-		MutexUnlock(&threadContext->sync.videoFrameMutex);
-	}
-
-	if (!MutexTryLock(&threadContext->sync.audioBufferMutex)) {
-		ConditionWake(&threadContext->sync.audioRequiredCond);
-		MutexUnlock(&threadContext->sync.audioBufferMutex);
-	}
 
 #ifdef ENABLE_DEBUGGERS
 	if (threadContext->core && threadContext->core->debugger) {
@@ -109,25 +79,24 @@ static void _wait(struct mCoreThreadInternal* threadContext) {
 
 	MutexLock(&threadContext->stateMutex);
 	ConditionWake(&threadContext->stateOnThreadCond);
+	ConditionWait(&threadContext->stateOffThreadCond, &threadContext->stateMutex);
 }
 
 static void _waitOnRequest(struct mCoreThreadInternal* threadContext, enum mCoreThreadRequest request) {
-	bool videoFrameWait, audioWait;
-	_waitPrologue(threadContext, &videoFrameWait, &audioWait);
+	mCoreSyncInterrupt(&threadContext->sync);
 	while (threadContext->requested & request) {
 		_pokeRequest(threadContext);
 		_wait(threadContext);
 	}
-	_waitEpilogue(threadContext, videoFrameWait, audioWait);
+	mCoreSyncResume(&threadContext->sync);
 }
 
 static void _waitUntilNotState(struct mCoreThreadInternal* threadContext, enum mCoreThreadState state) {
-	bool videoFrameWait, audioWait;
-	_waitPrologue(threadContext, &videoFrameWait, &audioWait);
+	mCoreSyncInterrupt(&threadContext->sync);
 	while (threadContext->state == state) {
 		_wait(threadContext);
 	}
-	_waitEpilogue(threadContext, videoFrameWait, audioWait);
+	mCoreSyncResume(&threadContext->sync);
 }
 
 static void _sendRequest(struct mCoreThreadInternal* threadContext, enum mCoreThreadRequest request) {
@@ -292,7 +261,9 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 		if (debugger) {
 			while (impl->state == mTHREAD_RUNNING) {
 				MutexUnlock(&impl->stateMutex);
-				mDebuggerRun(debugger);
+				if (mCoreSyncWait(&impl->sync, 1)) {
+					mDebuggerRun(debugger);
+				}
 				MutexLock(&impl->stateMutex);
 				if (debugger->state == DEBUGGER_SHUTDOWN) {
 					_changeState(impl, mTHREAD_EXITING);
@@ -303,6 +274,10 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 		{
 			while (impl->state == mTHREAD_RUNNING) {
 				MutexUnlock(&impl->stateMutex);
+				if (!mCoreSyncWait(&impl->sync, 1)) {
+					MutexLock(&impl->stateMutex);
+					break;
+				}
 				core->runLoop(core);
 				MutexLock(&impl->stateMutex);
 			}
@@ -315,6 +290,7 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 
 			while (impl->state >= mTHREAD_MIN_WAITING && impl->state <= mTHREAD_MAX_WAITING) {
 #ifdef ENABLE_DEBUGGERS
+				ConditionWake(&impl->stateOffThreadCond);
 				if (debugger && debugger->state != DEBUGGER_SHUTDOWN) {
 					mDebuggerUpdate(debugger);
 					ConditionWaitTimed(&impl->stateOnThreadCond, &impl->stateMutex, 10);
@@ -322,13 +298,6 @@ static THREAD_ENTRY _mCoreThreadRun(void* context) {
 #endif
 				{
 					ConditionWait(&impl->stateOnThreadCond, &impl->stateMutex);
-				}
-
-				if (impl->sync.audioWait) {
-					MutexUnlock(&impl->stateMutex);
-					mCoreSyncLockAudio(&impl->sync);
-					mCoreSyncProduceAudio(&impl->sync, core->getAudioBuffer(core));
-					MutexLock(&impl->stateMutex);
 				}
 			}
 #ifdef ENABLE_SCRIPTING
@@ -434,12 +403,7 @@ bool mCoreThreadStart(struct mCoreThread* threadContext) {
 	MutexInit(&threadContext->impl->stateMutex);
 	ConditionInit(&threadContext->impl->stateOnThreadCond);
 	ConditionInit(&threadContext->impl->stateOffThreadCond);
-
-	MutexInit(&threadContext->impl->sync.videoFrameMutex);
-	ConditionInit(&threadContext->impl->sync.videoFrameAvailableCond);
-	ConditionInit(&threadContext->impl->sync.videoFrameRequiredCond);
-	MutexInit(&threadContext->impl->sync.audioBufferMutex);
-	ConditionInit(&threadContext->impl->sync.audioRequiredCond);
+	mCoreSyncInit(&threadContext->impl->sync);
 
 	threadContext->impl->interruptDepth = 0;
 
@@ -519,16 +483,7 @@ void mCoreThreadEnd(struct mCoreThread* threadContext) {
 	threadContext->impl->state = mTHREAD_EXITING;
 	ConditionWake(&threadContext->impl->stateOnThreadCond);
 	MutexUnlock(&threadContext->impl->stateMutex);
-	MutexLock(&threadContext->impl->sync.audioBufferMutex);
-	threadContext->impl->sync.audioWait = 0;
-	ConditionWake(&threadContext->impl->sync.audioRequiredCond);
-	MutexUnlock(&threadContext->impl->sync.audioBufferMutex);
-
-	MutexLock(&threadContext->impl->sync.videoFrameMutex);
-	threadContext->impl->sync.videoFrameWait = false;
-	ConditionWake(&threadContext->impl->sync.videoFrameRequiredCond);
-	ConditionWake(&threadContext->impl->sync.videoFrameAvailableCond);
-	MutexUnlock(&threadContext->impl->sync.videoFrameMutex);
+	mCoreSyncInterrupt(&threadContext->impl->sync);
 }
 
 void mCoreThreadReset(struct mCoreThread* threadContext) {
@@ -549,16 +504,7 @@ void mCoreThreadJoin(struct mCoreThread* threadContext) {
 	MutexDeinit(&threadContext->impl->stateMutex);
 	ConditionDeinit(&threadContext->impl->stateOnThreadCond);
 	ConditionDeinit(&threadContext->impl->stateOffThreadCond);
-
-	MutexDeinit(&threadContext->impl->sync.videoFrameMutex);
-	ConditionWake(&threadContext->impl->sync.videoFrameAvailableCond);
-	ConditionDeinit(&threadContext->impl->sync.videoFrameAvailableCond);
-	ConditionWake(&threadContext->impl->sync.videoFrameRequiredCond);
-	ConditionDeinit(&threadContext->impl->sync.videoFrameRequiredCond);
-
-	ConditionWake(&threadContext->impl->sync.audioRequiredCond);
-	ConditionDeinit(&threadContext->impl->sync.audioRequiredCond);
-	MutexDeinit(&threadContext->impl->sync.audioBufferMutex);
+	mCoreSyncDeinit(&threadContext->impl->sync);
 
 	free(threadContext->impl);
 	threadContext->impl = NULL;

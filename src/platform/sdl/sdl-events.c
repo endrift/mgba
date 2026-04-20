@@ -610,7 +610,7 @@ static void _mSDLHandleKeypress(struct mCoreThread* context, struct mSDLPlayer* 
 		return;
 	}
 	if (keycode == SDLK_TAB) {
-		context->impl->sync.audioWait = event->type != SDL_KEYDOWN;
+		mCoreSyncSetActive(&context->impl->sync, event->type != SDL_KEYDOWN);
 		return;
 	}
 	if (keycode == SDLK_BACKQUOTE) {

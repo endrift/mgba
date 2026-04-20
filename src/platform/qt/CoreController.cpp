@@ -533,13 +533,7 @@ void CoreController::addFrameAction(std::function<void ()> action) {
 }
 
 void CoreController::setSync(bool sync) {
-	if (sync) {
-		m_threadContext.impl->sync.audioWait = m_audioSync;
-		m_threadContext.impl->sync.videoFrameWait = m_videoSync;
-	} else {
-		m_threadContext.impl->sync.audioWait = false;
-		m_threadContext.impl->sync.videoFrameWait = false;
-	}
+	mCoreSyncSetActive(&m_threadContext.impl->sync, sync);
 }
 
 void CoreController::showResetInfo(bool enable) {
@@ -1307,29 +1301,44 @@ void CoreController::updateFastForward() {
 			m_threadContext.core->opts.volume = m_fastForwardVolume;
 		}
 		m_threadContext.core->opts.mute = m_fastForwardMute || m_mute;
-		setSync(false);
+
+		float newFpsTarget = 0;
 
 		// If we aren't holding the fast forward button
 		// then use the non "(held)" ratio
-		if(!m_fastForward) {
+		if (!m_fastForward) {
 			if (m_fastForwardRatio > 0) {
-				m_threadContext.impl->sync.fpsTarget = m_fpsTarget * m_fastForwardRatio;
-				m_threadContext.impl->sync.audioWait = true;
+				newFpsTarget = m_fpsTarget * m_fastForwardRatio;
 			}
 		} else {
 			// If we are holding the fast forward button,
 			// then use the held ratio
 			if (m_fastForwardHeldRatio > 0) {
-				m_threadContext.impl->sync.fpsTarget = m_fpsTarget * m_fastForwardHeldRatio;
-				m_threadContext.impl->sync.audioWait = true;
+				newFpsTarget = m_fpsTarget * m_fastForwardHeldRatio;
 			}
+		}
+
+		if (newFpsTarget) {
+			mCoreSyncSetFpsTarget(&m_threadContext.impl->sync, newFpsTarget);
+			mCoreSyncLock(&m_threadContext.impl->sync);
+			mCoreSyncSetAudioSync(&m_threadContext.impl->sync, true);
+			mCoreSyncSetVideoSync(&m_threadContext.impl->sync, false);
+			mCoreSyncUnlock(&m_threadContext.impl->sync);
+			setSync(true);
+		} else {
+			setSync(false);
 		}
 	} else {
 		if (!mCoreConfigGetIntValue(&m_threadContext.core->config, "volume", &m_threadContext.core->opts.volume)) {
 			m_threadContext.core->opts.volume = 0x100;
 		}
 		mCoreConfigGetBoolValue(&m_threadContext.core->config, "mute", &m_threadContext.core->opts.mute);
-		m_threadContext.impl->sync.fpsTarget = m_fpsTarget;
+
+		mCoreSyncSetFpsTarget(&m_threadContext.impl->sync, m_fpsTarget);
+		mCoreSyncLock(&m_threadContext.impl->sync);
+		mCoreSyncSetAudioSync(&m_threadContext.impl->sync, m_audioSync);
+		mCoreSyncSetVideoSync(&m_threadContext.impl->sync, m_videoSync);
+		mCoreSyncUnlock(&m_threadContext.impl->sync);
 		setSync(true);
 	}
 

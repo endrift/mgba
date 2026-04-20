@@ -460,6 +460,7 @@ void DisplayGL::swapInterval(int interval) {
 
 void DisplayGL::framePosted() {
 	m_painter->enqueue(m_context->drawContext());
+	// TODO unblock sync
 	QMetaObject::invokeMethod(m_painter.get(), "draw");
 }
 
@@ -839,7 +840,7 @@ void PainterGL::draw() {
 	mCoreSync* sync = &m_context->thread()->impl->sync;
 	if (!mCoreSyncWaitFrameStart(sync)) {
 		mCoreSyncWaitFrameEnd(sync);
-		if (!sync->audioWait && !sync->videoFrameWait) {
+		if (!sync->audioSync && !sync->videoSync) {
 			return;
 		}
 		if (m_delayTimer.elapsed() >= 1000 / m_window->screen()->refreshRate()) {
@@ -850,7 +851,7 @@ void PainterGL::draw() {
 		}
 		return;
 	}
-	int wantSwap = sync->audioWait || sync->videoFrameWait;
+	int wantSwap = sync->audioSync || sync->videoSync;
 	if (m_swapInterval != wantSwap) {
 		swapInterval(wantSwap);
 	}
@@ -869,7 +870,7 @@ void PainterGL::draw() {
 			while (m_delayTimer.nsecsElapsed() + OVERHEAD_NSEC < 1000000000 / sync->fpsTarget) {
 				QThread::usleep(500);
 			}
-			forceRedraw = sync->videoFrameWait;
+			forceRedraw = sync->videoSync;
 		}
 		if (!forceRedraw) {
 			forceRedraw = m_delayTimer.nsecsElapsed() + OVERHEAD_NSEC >= 1000000000 / m_window->screen()->refreshRate();
@@ -892,7 +893,7 @@ void PainterGL::draw() {
 
 void PainterGL::forceDraw() {
 	performDraw();
-	if (!m_context->thread()->impl->sync.audioWait && !m_context->thread()->impl->sync.videoFrameWait) {
+	if (!m_context->thread()->impl->sync.audioSync && !m_context->thread()->impl->sync.videoSync) {
 		if (m_delayTimer.elapsed() < 1000 / m_window->screen()->refreshRate()) {
 			return;
 		}
