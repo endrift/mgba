@@ -6,6 +6,7 @@
 #include "main.h"
 
 #include <mgba/core/core.h>
+#include <mgba/core/sync.h>
 #include <mgba/core/thread.h>
 #include <mgba/core/version.h>
 
@@ -174,10 +175,10 @@ void mSDLGLCommonRunloop(struct mSDLRenderer* renderer, void* user) {
 			VideoBackendRecenter(v, 1);
 		}
 
-		if (mCoreSyncWaitFrameStart(&context->impl->sync)) {
+		if (mCoreSyncWaitFrameStart(context->sync)) {
 			v->setImage(v, VIDEO_LAYER_IMAGE, renderer->outputBuffer);
 		}
-		mCoreSyncWaitFrameEnd(&context->impl->sync);
+		mCoreSyncWaitFrameEnd(context->sync);
 		v->drawFrame(v);
 		v->swap(v);
 	}

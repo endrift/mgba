@@ -7,6 +7,7 @@
 
 #include <mgba/core/core.h>
 #include <mgba/core/config.h>
+#include <mgba/internal/core.h>
 #include <mgba-util/audio-buffer.h>
 
 static const float _defaultFPSTarget = 60.f;

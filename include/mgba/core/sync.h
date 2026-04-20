@@ -10,41 +10,7 @@
 
 CXX_GUARD_START
 
-#include <mgba-util/threading.h>
-
-struct mCoreSync {
-	Mutex mutex;
-	Condition readyCond;
-	bool interrupt;
-	bool busy;
-	bool active;
-
-	bool audioSync;
-	bool videoSync;
-
-	int videoFramePending;
-	Condition videoFrameAvailableCond;
-
-	size_t audioHighWater;
-	const struct mAudioBuffer* audioBuffer;
-
-	bool clockSync;
-	int32_t lastCycles;
-	double clockOffset;
-#ifdef _WIN32
-	uint64_t currentClock;
-	double qpcFreq;
-#else
-	uint64_t currentClock;
-#endif
-
-	int32_t coreFrequency;
-	float systemFps;
-	float fpsTarget;
-	float speedMultiplier;
-	float clockRatio;
-};
-
+struct mCoreSync;
 void mCoreSyncInit(struct mCoreSync* sync);
 void mCoreSyncDeinit(struct mCoreSync* sync);
 

@@ -9,7 +9,9 @@
 #include "LogController.h"
 
 #include <mgba/core/core.h>
+#include <mgba/core/sync.h>
 #include <mgba/core/thread.h>
+#include <mgba/internal/core.h>
 #include <mgba/internal/gba/audio.h>
 
 #include <QDebug>
@@ -35,12 +37,12 @@ void AudioDevice::setFormat(const QAudioFormat& format) {
 		LOG(QT, INFO) << tr("Can't set format of context-less audio device");
 		return;
 	}
-	mCoreSyncLock(&m_context->impl->sync);
+	mCoreSyncLock(m_context->sync);
 	mCore* core = m_context->core;
 	mAudioResamplerSetSource(&m_resampler, core->getAudioBuffer(core), core->audioSampleRate(core), true);
 	m_format = format;
 	adjustResampler();
-	mCoreSyncUnlock(&m_context->impl->sync);
+	mCoreSyncUnlock(m_context->sync);
 }
 
 void AudioDevice::setBufferSamples(int samples) {
@@ -61,13 +63,13 @@ qint64 AudioDevice::readData(char* data, qint64 maxSize) {
 		return 0;
 	}
 
-	mCoreSyncLock(&m_context->impl->sync);
+	mCoreSyncLock(m_context->sync);
 	mAudioResamplerProcess(&m_resampler);
 	if (mAudioBufferAvailable(&m_buffer) < 128) {
-		mCoreSyncConsumeAudio(&m_context->impl->sync);
+		mCoreSyncConsumeAudio(m_context->sync);
 		// Audio is running slow...let's wait a tiny bit for more to come in
 		QThread::usleep(100);
-		mCoreSyncLock(&m_context->impl->sync);
+		mCoreSyncLock(m_context->sync);
 		mAudioResamplerProcess(&m_resampler);
 	}
 	quint64 available = std::min<quint64>({
@@ -76,7 +78,7 @@ qint64 AudioDevice::readData(char* data, qint64 maxSize) {
 		std::numeric_limits<int>::max()
 	});
 	mAudioBufferRead(&m_buffer, reinterpret_cast<int16_t*>(data), available);
-	mCoreSyncConsumeAudio(&m_context->impl->sync);
+	mCoreSyncConsumeAudio(m_context->sync);
 	return available * sizeof(mStereoSample);
 }
 
@@ -101,18 +103,18 @@ qint64 AudioDevice::bytesAvailable() {
 	if (!m_context->core) {
 		return true;
 	}
-	mCoreSyncLock(&m_context->impl->sync);
+	mCoreSyncLock(m_context->sync);
 	adjustResampler();
 	mAudioResamplerProcess(&m_resampler);
 	int available = mAudioBufferAvailable(&m_buffer);
-	mCoreSyncUnlock(&m_context->impl->sync);
+	mCoreSyncUnlock(m_context->sync);
 	return available * sizeof(mStereoSample);
 }
 
 void AudioDevice::adjustResampler() {
 	mCore* core = m_context->core;
-	double fauxClock = mCoreCalculateFramerateRatio(m_context->core, m_context->impl->sync.fpsTarget);
+	double fauxClock = mCoreCalculateFramerateRatio(m_context->core, m_context->sync->fpsTarget);
 	mAudioResamplerSetDestination(&m_resampler, &m_buffer, m_format.sampleRate() * fauxClock);
-	m_context->impl->sync.audioHighWater = m_samples + m_resampler.highWaterMark + m_resampler.lowWaterMark;
-	m_context->impl->sync.audioHighWater *= core->audioSampleRate(core) / (m_format.sampleRate() * fauxClock);
+	m_context->sync->audioHighWater = m_samples + m_resampler.highWaterMark + m_resampler.lowWaterMark;
+	m_context->sync->audioHighWater *= core->audioSampleRate(core) / (m_format.sampleRate() * fauxClock);
 }

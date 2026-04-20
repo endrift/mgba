@@ -6,6 +6,7 @@
 #include "main.h"
 
 #include <mgba/core/core.h>
+#include <mgba/core/sync.h>
 #include <mgba/core/thread.h>
 #include <mgba/core/version.h>
 
@@ -74,7 +75,7 @@ void mSDLSWRunloop(struct mSDLRenderer* renderer, void* user) {
 			mSDLHandleEvent(context, &renderer->player, &event);
 		}
 
-		if (mCoreSyncWaitFrameStart(&context->impl->sync)) {
+		if (mCoreSyncWaitFrameStart(context->sync)) {
 #ifdef USE_PIXMAN
 			if (renderer->ratio > 1) {
 				pixman_image_composite32(PIXMAN_OP_SRC, renderer->pix, 0, renderer->screenpix,
@@ -90,7 +91,7 @@ void mSDLSWRunloop(struct mSDLRenderer* renderer, void* user) {
 			SDL_Flip(surface);
 			SDL_LockSurface(surface);
 		}
-		mCoreSyncWaitFrameEnd(&context->impl->sync);
+		mCoreSyncWaitFrameEnd(context->sync);
 	}
 }
 

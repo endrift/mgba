@@ -12,6 +12,7 @@
 #endif
 #include <mgba/core/serialize.h>
 #include <mgba/core/timing.h>
+#include <mgba/internal/core.h>
 #include <mgba-util/patch.h>
 #include <mgba-util/vfs.h>
 
@@ -410,6 +411,7 @@ bool mCoreThreadStart(struct mCoreThread* threadContext) {
 	ConditionInit(&threadContext->impl->stateOnThreadCond);
 	ConditionInit(&threadContext->impl->stateOffThreadCond);
 	mCoreSyncInit(&threadContext->impl->sync);
+	threadContext->sync = &threadContext->impl->sync;
 
 	threadContext->impl->interruptDepth = 0;
 

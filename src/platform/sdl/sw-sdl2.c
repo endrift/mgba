@@ -6,6 +6,7 @@
 #include "main.h"
 
 #include <mgba/core/core.h>
+#include <mgba/core/sync.h>
 #include <mgba/core/thread.h>
 #include <mgba/core/version.h>
 
@@ -58,7 +59,7 @@ void mSDLSWRunloop(struct mSDLRenderer* renderer, void* user) {
 			mSDLHandleEvent(context, &renderer->player, &event);
 		}
 
-		if (mCoreSyncWaitFrameStart(&context->impl->sync)) {
+		if (mCoreSyncWaitFrameStart(context->sync)) {
 			SDL_UnlockTexture(renderer->sdlTex);
 			SDL_RenderCopy(renderer->sdlRenderer, renderer->sdlTex, 0, 0);
 			SDL_RenderPresent(renderer->sdlRenderer);
@@ -66,7 +67,7 @@ void mSDLSWRunloop(struct mSDLRenderer* renderer, void* user) {
 			SDL_LockTexture(renderer->sdlTex, 0, (void**) &renderer->outputBuffer, &stride);
 			renderer->core->setVideoBuffer(renderer->core, renderer->outputBuffer, stride / BYTES_PER_PIXEL);
 		}
-		mCoreSyncWaitFrameEnd(&context->impl->sync);
+		mCoreSyncWaitFrameEnd(context->sync);
 	}
 }
 

@@ -48,58 +48,8 @@ struct mCoreThread {
 #endif
 
 	struct mCoreThreadInternal* impl;
+	struct mCoreSync* sync;
 };
-
-#ifndef OPAQUE_THREADING
-#include <mgba/core/rewind.h>
-#include <mgba/core/sync.h>
-#include <mgba-util/threading.h>
-
-enum mCoreThreadState {
-	mTHREAD_INITIALIZED = -1,
-	mTHREAD_RUNNING = 0,
-	mTHREAD_REQUEST,
-
-	mTHREAD_INTERRUPTED,
-	mTHREAD_PAUSED,
-	mTHREAD_CRASHED,
-
-	mTHREAD_INTERRUPTING,
-	mTHREAD_EXITING,
-
-	mTHREAD_SHUTDOWN,
-
-	mTHREAD_MIN_WAITING = mTHREAD_INTERRUPTED,
-	mTHREAD_MAX_WAITING = mTHREAD_CRASHED
-};
-
-enum mCoreThreadRequest {
-	mTHREAD_REQ_PAUSE = 1, // User-set pause
-	mTHREAD_REQ_WAIT = 2, // Core-set pause
-	mTHREAD_REQ_RESET = 4,
-	mTHREAD_REQ_RUN_ON = 8,
-	mTHREAD_REQ_CRASHED = 16,
-	mTHREAD_REQ_REWIND_EMPTY = 32,
-};
-
-struct mCoreThreadInternal {
-	Thread thread;
-	enum mCoreThreadState state;
-	bool rewinding;
-	int requested;
-
-	Mutex stateMutex;
-	Condition stateOnThreadCond;
-	Condition stateOffThreadCond;
-	int interruptDepth;
-	bool frameWasOn;
-
-	struct mCoreSync sync;
-	struct mCoreRewindContext rewind;
-	struct mCore* core;
-};
-
-#endif
 
 bool mCoreThreadStart(struct mCoreThread* threadContext);
 bool mCoreThreadHasStarted(struct mCoreThread* threadContext);

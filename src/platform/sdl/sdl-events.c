@@ -8,6 +8,7 @@
 #include <mgba/core/core.h>
 #include <mgba/core/input.h>
 #include <mgba/core/serialize.h>
+#include <mgba/core/sync.h>
 #include <mgba/core/thread.h>
 #include <mgba/debugger/debugger.h>
 #include <mgba/internal/gba/input.h>
@@ -610,7 +611,7 @@ static void _mSDLHandleKeypress(struct mCoreThread* context, struct mSDLPlayer* 
 		return;
 	}
 	if (keycode == SDLK_TAB) {
-		mCoreSyncSetActive(&context->impl->sync, event->type != SDL_KEYDOWN);
+		mCoreSyncSetActive(context->sync, event->type != SDL_KEYDOWN);
 		return;
 	}
 	if (keycode == SDLK_BACKQUOTE) {

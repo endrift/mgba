@@ -21,6 +21,7 @@
 #include <cmath>
 
 #include <mgba/core/core.h>
+#include <mgba/internal/core.h>
 #include <mgba-util/math.h>
 #ifdef BUILD_GL
 #include "platform/opengl/gl.h"
@@ -837,7 +838,7 @@ void PainterGL::draw() {
 		return;
 	}
 
-	mCoreSync* sync = &m_context->thread()->impl->sync;
+	mCoreSync* sync = m_context->thread()->sync;
 	if (!mCoreSyncWaitFrameStart(sync)) {
 		mCoreSyncWaitFrameEnd(sync);
 		if (!sync->audioSync && !sync->videoSync) {
@@ -893,7 +894,7 @@ void PainterGL::draw() {
 
 void PainterGL::forceDraw() {
 	performDraw();
-	if (!m_context->thread()->impl->sync.audioSync && !m_context->thread()->impl->sync.videoSync) {
+	if (!m_context->thread()->sync->audioSync && !m_context->thread()->sync->videoSync) {
 		if (m_delayTimer.elapsed() < 1000 / m_window->screen()->refreshRate()) {
 			return;
 		}

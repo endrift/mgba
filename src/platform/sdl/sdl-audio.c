@@ -6,7 +6,9 @@
 #include "sdl-audio.h"
 
 #include <mgba/core/core.h>
+#include <mgba/core/sync.h>
 #include <mgba/core/thread.h>
+#include <mgba/internal/core.h>
 
 mLOG_DEFINE_CATEGORY(SDL_AUDIO, "SDL Audio", "platform.sdl.audio");
 
@@ -63,7 +65,7 @@ bool mSDLInitAudio(struct mSDLAudio* context, struct mCoreThread* threadContext)
 
 	if (threadContext) {
 		context->core = threadContext->core;
-		context->sync = &threadContext->impl->sync;
+		context->sync = threadContext->sync;
 
 		mSDLResumeAudio(context);
 	}

@@ -18,6 +18,7 @@
 #include <QMutexLocker>
 
 #include <mgba/core/serialize.h>
+#include <mgba/core/sync.h>
 #include <mgba/core/version.h>
 #include <mgba/feature/video-logger.h>
 #ifdef M_CORE_GBA
@@ -29,6 +30,7 @@
 #include <mgba/internal/gb/gb.h>
 #include <mgba/internal/gb/renderers/cache-set.h>
 #endif
+#include <mgba/internal/core.h>
 #include "feature/sqlite3/no-intro.h"
 #include <mgba-util/math.h>
 #include <mgba-util/vfs.h>
@@ -320,7 +322,7 @@ void CoreController::loadConfig(ConfigController* config) {
 	m_threadContext.core->setVideoBuffer(m_threadContext.core, reinterpret_cast<mColor*>(m_activeBuffer.data()), sizeAfter.width());
 
 	if (hasStarted()) {
-		mCoreSyncSetFpsTarget(&m_threadContext.impl->sync, m_fpsTarget);
+		mCoreSyncSetFpsTarget(m_threadContext.sync, m_fpsTarget);
 		updateFastForward();
 		mCoreThreadRewindParamsChanged(&m_threadContext);
 	}
@@ -535,7 +537,7 @@ void CoreController::addFrameAction(std::function<void ()> action) {
 }
 
 void CoreController::setSync(bool sync) {
-	mCoreSyncSetActive(&m_threadContext.impl->sync, sync);
+	mCoreSyncSetActive(m_threadContext.sync, sync);
 }
 
 void CoreController::showResetInfo(bool enable) {
@@ -1321,7 +1323,7 @@ void CoreController::updateFastForward() {
 		}
 
 		if (ratio) {
-			mCoreSyncSetSpeedMultiplier(&m_threadContext.impl->sync, ratio);
+			mCoreSyncSetSpeedMultiplier(m_threadContext.sync, ratio);
 			setSync(true);
 		} else {
 			setSync(false);
@@ -1332,7 +1334,7 @@ void CoreController::updateFastForward() {
 		}
 		mCoreConfigGetBoolValue(&m_threadContext.core->config, "mute", &m_threadContext.core->opts.mute);
 
-		mCoreSyncSetSpeedMultiplier(&m_threadContext.impl->sync, 1);
+		mCoreSyncSetSpeedMultiplier(m_threadContext.sync, 1);
 		setSync(true);
 	}
 
