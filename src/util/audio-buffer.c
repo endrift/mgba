@@ -24,6 +24,10 @@ size_t mAudioBufferCapacity(const struct mAudioBuffer* buffer) {
 	return mCircleBufferCapacity(&buffer->data) / (buffer->channels * sizeof(int16_t));
 }
 
+bool mAudioBufferFull(const struct mAudioBuffer* buffer) {
+	return mCircleBufferSize(&buffer->data) == mCircleBufferCapacity(&buffer->data);
+}
+
 void mAudioBufferClear(struct mAudioBuffer* buffer) {
 	mCircleBufferClear(&buffer->data);
 }
